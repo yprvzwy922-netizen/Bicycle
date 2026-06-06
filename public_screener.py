@@ -36,10 +36,11 @@ st.title("📊 Put-Selling Tool")
 st.markdown("Live options data · Refreshes every 5 min · Always reconcile with your broker before trading.")
 st.markdown("---")
 
-col1, col2 = st.columns(2)
-with col1:
-    st.page_link("public_pages/1_Screener.py", label="📋  Screener", icon="📋", use_container_width=True)
-    st.caption("Full watchlist — best 1M/3M put per ticker, verdict, filters")
-with col2:
-    st.page_link("public_pages/2_Option_Finder.py", label="🔍  Option Finder", icon="🔍", use_container_width=True)
-    st.caption("Pick any ticker + tenor + delta band → full put chain + roll calculator")
+st.markdown("""
+### 👈 Use the arrow in the top-left corner to open the menu, then choose:
+
+| | Page | What it does |
+|---|---|---|
+| 📋 | **Screener** | Full watchlist — best 1M/3M put per ticker, verdict, filters |
+| 🔍 | **Option Finder** | Pick any ticker + tenor + delta band → full put chain + roll calculator |
+""")
