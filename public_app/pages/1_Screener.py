@@ -13,7 +13,12 @@ st.set_page_config(page_title="Screener", page_icon="📋", layout="wide")
 # ── Auth guard ────────────────────────────────────────────────────────────────
 if not st.session_state.get("authenticated"):
     st.warning("Please log in from the home page.")
+    if st.button("← Go to login"):
+        st.switch_page("app.py")
     st.stop()
+
+if st.button("← Home"):
+    st.switch_page("app.py")
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 WATCHLIST = [

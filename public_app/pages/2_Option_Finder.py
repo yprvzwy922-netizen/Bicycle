@@ -12,7 +12,12 @@ st.set_page_config(page_title="Option Finder", page_icon="🔍", layout="wide")
 
 if not st.session_state.get("authenticated"):
     st.warning("Please log in from the home page.")
+    if st.button("← Go to login"):
+        st.switch_page("app.py")
     st.stop()
+
+if st.button("← Home"):
+    st.switch_page("app.py")
 
 WATCHLIST_TICKERS = ["IREN","CIFR","NBIS","CRWV","CEG","DGXX","VRT","GEV",
                      "NVDA","MU","AMD","GOOG","BB","LLY","NVO","AMGN","HIMS","VKTX","IBRX"]
