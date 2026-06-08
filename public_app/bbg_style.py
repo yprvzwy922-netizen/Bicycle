@@ -99,9 +99,21 @@ p, li, .stMarkdown {
     color: #000000 !important;
 }
 
-/* All blue-background buttons must have black text */
+/* All blue-background buttons must have black text — target button AND every child */
+.stButton > button[kind="primary"],
+.stButton > button[kind="primary"]:hover,
+.stButton > button[kind="primary"]:active,
+.stButton > button[kind="primary"]:focus,
 button[data-testid="baseButton-primary"],
-button[data-testid="baseButton-primary"]:hover {
+button[data-testid="baseButton-primary"]:hover,
+.stButton > button[kind="primary"] *,
+.stButton > button[kind="primary"] p,
+.stButton > button[kind="primary"] div,
+.stButton > button[kind="primary"] span,
+button[data-testid="baseButton-primary"] *,
+button[data-testid="baseButton-primary"] p,
+button[data-testid="baseButton-primary"] div,
+button[data-testid="baseButton-primary"] span {
     color: #000000 !important;
     font-weight: 700 !important;
 }
