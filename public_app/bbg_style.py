@@ -21,22 +21,22 @@ html, body, [class*="css"] {
 /* ── Typography ── */
 h1 {
     font-family: 'IBM Plex Mono', monospace !important;
-    color: #ff9900 !important;
+    color: #00c8ff !important;
     font-size: 1.3rem !important;
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    border-bottom: 2px solid #ff9900;
+    border-bottom: 2px solid #00c8ff;
     padding-bottom: 6px;
     margin-bottom: 16px !important;
 }
 
 h2 {
     font-family: 'IBM Plex Mono', monospace !important;
-    color: #ff9900 !important;
+    color: #00c8ff !important;
     font-size: 0.95rem !important;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    border-left: 3px solid #ff9900;
+    border-left: 3px solid #00c8ff;
     padding-left: 8px;
 }
 
@@ -81,21 +81,21 @@ p, li, .stMarkdown {
 }
 
 .stButton > button:hover {
-    background-color: #ff9900 !important;
+    background-color: #00c8ff !important;
     color: #000000 !important;
-    border-color: #ff9900 !important;
+    border-color: #00c8ff !important;
 }
 
 .stButton > button[kind="primary"] {
-    background-color: #ff9900 !important;
+    background-color: #00c8ff !important;
     color: #000000 !important;
-    border-color: #ff9900 !important;
+    border-color: #00c8ff !important;
     font-weight: 600 !important;
 }
 
 .stButton > button[kind="primary"]:hover {
-    background-color: #cc7a00 !important;
-    border-color: #cc7a00 !important;
+    background-color: #0099cc !important;
+    border-color: #0099cc !important;
 }
 
 /* ── Inputs ── */
@@ -119,7 +119,7 @@ p, li, .stMarkdown {
 
 /* ── Slider ── */
 .stSlider > div > div > div > div {
-    background-color: #ff9900 !important;
+    background-color: #00c8ff !important;
 }
 
 /* ── Metrics ── */
@@ -140,7 +140,7 @@ p, li, .stMarkdown {
 
 [data-testid="stMetricValue"] {
     font-family: 'IBM Plex Mono', monospace !important;
-    color: #ff9900 !important;
+    color: #00c8ff !important;
     font-size: 1.3rem !important;
 }
 
@@ -151,7 +151,7 @@ p, li, .stMarkdown {
 
 .stDataFrame th {
     background-color: #111111 !important;
-    color: #ff9900 !important;
+    color: #00c8ff !important;
     font-family: 'IBM Plex Mono', monospace !important;
     font-size: 0.68rem !important;
     text-transform: uppercase;
@@ -178,7 +178,7 @@ p, li, .stMarkdown {
     background-color: #1a1200 !important;
     border: 1px solid #4d3800 !important;
     border-radius: 0 !important;
-    color: #ff9900 !important;
+    color: #00c8ff !important;
 }
 
 .stError {
@@ -207,7 +207,7 @@ p, li, .stMarkdown {
 
 /* ── Progress bar ── */
 .stProgress > div > div > div > div {
-    background-color: #ff9900 !important;
+    background-color: #00c8ff !important;
 }
 
 /* ── Caption ── */
@@ -233,7 +233,7 @@ hr {
 }
 
 .stTabs [aria-selected="true"] {
-    background-color: #ff9900 !important;
+    background-color: #00c8ff !important;
     color: #000000 !important;
 }
 </style>

@@ -62,12 +62,24 @@ with col3:
 
 st.markdown("---")
 
-col4, col5 = st.columns(2, gap="large")
+col4, col5, col6 = st.columns(3, gap="large")
 with col4:
     st.markdown("**OPTION FINDER**")
     st.markdown("Deep-dive chain for any ticker — all strikes, all metrics, roll calculator.")
     if st.button("OPEN OPTION FINDER", type="primary", use_container_width=True):
         st.switch_page("pages/4_Option_Finder.py")
+
+with col5:
+    st.markdown("**TRADE LOG**")
+    st.markdown("Record every trade — short puts, covered calls, spreads. Export to CSV.")
+    if st.button("OPEN TRADE LOG", type="primary", use_container_width=True):
+        st.switch_page("pages/5_Trade_Log.py")
+
+with col6:
+    st.markdown("**PORTFOLIO & RISK**")
+    st.markdown("Open positions, delta exposure by stock and sector, risk limit gauges.")
+    if st.button("OPEN PORTFOLIO", type="primary", use_container_width=True):
+        st.switch_page("pages/6_Portfolio.py")
 
 st.markdown(" ")
 st.caption("DATA: YFINANCE (FREE, BEST-EFFORT) | MATH: BLACK-SCHOLES EUROPEAN APPROX | NOT EXECUTION READY")
