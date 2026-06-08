@@ -283,6 +283,25 @@ def best_bear_call_spread(tkr, short_delta, spread_width_pct, target_dte):
             "ann_roc": round(roc * 365/dte, 4) if dte > 0 and not np.isnan(roc) else float("nan"),
             "oi": int(short_row.get("openInterest", 0) or 0)}
 
+@st.cache_data(ttl=60, show_spinner=False)  # 1-min cache — live option prices
+def fetch_option_live(tkr: str, strike: float, expiry: str, option_type: str = "put"):
+    """
+    Returns (current_mid, current_iv) for a specific option contract.
+    Used by Portfolio to mark-to-market open positions.
+    """
+    try:
+        raw = yf.Ticker(tkr).option_chain(expiry)
+        chain = raw.puts if option_type == "put" else raw.calls
+        chain = chain.copy()
+        chain["dist"] = (chain["strike"] - strike).abs()
+        row = chain.loc[chain["dist"].idxmin()]
+        mid = float((row["bid"] + row["ask"]) / 2)
+        iv  = float(row["impliedVolatility"])
+        return mid, iv
+    except Exception:
+        return float("nan"), float("nan")
+
+
 def score_put(ivr, ann_y, oi, sp, earn, dte_t, tech_s, conv):
     ivr_s = 1 + ivr * 4
     yld_s = (5 if ann_y >= 0.40 else 4 if ann_y >= 0.25 else 3 if ann_y >= 0.15 else 2 if ann_y >= 0.08 else 1) if not np.isnan(ann_y) else 1

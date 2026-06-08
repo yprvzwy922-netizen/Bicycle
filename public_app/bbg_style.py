@@ -96,6 +96,14 @@ p, li, .stMarkdown {
 .stButton > button[kind="primary"]:hover {
     background-color: #0099cc !important;
     border-color: #0099cc !important;
+    color: #000000 !important;
+}
+
+/* All blue-background buttons must have black text */
+button[data-testid="baseButton-primary"],
+button[data-testid="baseButton-primary"]:hover {
+    color: #000000 !important;
+    font-weight: 700 !important;
 }
 
 /* ── Inputs ── */

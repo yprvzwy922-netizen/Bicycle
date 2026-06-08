@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import bbg_style
-from shared import (get_watchlist, fetch_spot, bs_put_delta, bs_call_delta)
+from shared import (get_watchlist, fetch_spot, bs_put_delta, bs_call_delta,
+                    fetch_option_live)
 import datetime
 
 st.set_page_config(page_title="Portfolio & Risk", layout="wide")
@@ -34,12 +35,22 @@ with st.sidebar:
     MAX_SINGLE_NAME = st.slider("MAX SINGLE NAME %",      5,  30, 10) / 100
     MAX_SPECULATIVE = st.slider("MAX SPECULATIVE %",     10,  50, 20) / 100
     MAX_SECTOR      = st.slider("MAX SECTOR %",          10,  50, 25) / 100
-    MAX_DEPLOYED    = st.slider("MAX % DEPLOYED",        50, 100, 80) / 100
-    MIN_CASH_BUFFER = st.slider("MIN CASH BUFFER %",      5,  40, 20) / 100
+    MAX_DEPLOYED    = st.slider("MAX % DEPLOYED",        50, 100, 95) / 100   # 95% default — fully-invested strategy
+    MIN_CASH_BUFFER = st.slider("MIN CASH BUFFER %",      0,  40,  5) / 100
     MAX_DELTA_TOTAL = st.number_input("MAX NET DELTA ($ notional)", 0, 10_000_000, 50_000, 5_000,
                                       help="Max total dollar-delta across all positions")
     st.markdown("---")
     st.caption("LIMITS MATCH PUT-SELLING PLAYBOOK DEFAULTS")
+    st.markdown("---")
+    st.markdown("### DELTA EXPLAINED")
+    st.caption(
+        "NET $ DELTA = Σ (delta × contracts × 100 × spot price)\n\n"
+        "Shows total directional dollar exposure:\n"
+        "• Short Put = +delta (bullish — you profit if stock rises)\n"
+        "• Short Call = -delta (bearish — you profit if stock falls)\n"
+        "• Long Put  = -delta | Long Call = +delta\n\n"
+        "A net $ delta of +$50k means your P&L moves like you own $50k of stock."
+    )
 
 # ── Get open trades ───────────────────────────────────────────────────────────
 trades = st.session_state.get("trades", pd.DataFrame())
@@ -64,100 +75,122 @@ for _, t in open_trades.iterrows():
     except Exception:
         spot = float("nan")
 
-    # Estimate DTE remaining
+    # DTE remaining
     try:
-        exp_dt = datetime.datetime.strptime(str(t["EXPIRY"]), "%Y-%m-%d").date()
+        exp_dt  = datetime.datetime.strptime(str(t["EXPIRY"]), "%Y-%m-%d").date()
         dte_rem = max((exp_dt - datetime.date.today()).days, 0)
     except Exception:
         dte_rem = 0
 
-    # Delta estimation
-    strat = str(t["STRATEGY"])
-    short_strike = float(t["SHORT STRIKE"]) if pd.notna(t["SHORT STRIKE"]) else 0
-    long_strike  = float(t["LONG STRIKE"])  if pd.notna(t["LONG STRIKE"])  else 0
-    ctrs = int(t["CONTRACTS"])
-    prem = float(t["PREMIUM / CREDIT"]) if pd.notna(t["PREMIUM / CREDIT"]) else 0
-    iv_est = 0.35  # fallback IV for live delta — use broker for accuracy
+    strat        = str(t["STRATEGY"])
+    short_strike = float(t["SHORT STRIKE"]) if pd.notna(t["SHORT STRIKE"]) else 0.0
+    long_strike  = float(t["LONG STRIKE"])  if pd.notna(t["LONG STRIKE"])  else 0.0
+    ctrs         = int(t["CONTRACTS"])
+    prem         = float(t["PREMIUM / CREDIT"]) if pd.notna(t["PREMIUM / CREDIT"]) else 0.0
+    expiry_str   = str(t["EXPIRY"])
 
-    delta = float("nan")
+    # ── Live IV + current mid ──────────────────────────────────────────────────
+    is_put  = "Put" in strat or "put" in strat
+    is_call = "Call" in strat or "call" in strat
+    is_short = True  # all strategies in our log are short-side except Long Put/Call
+    if strat in ("Long Put (Hedge)", "Long Call"):
+        is_short = False
+
+    opt_type_str = "put" if is_put else "call"
+
+    curr_mid, live_iv = float("nan"), float("nan")
+    if short_strike > 0 and expiry_str and expiry_str != "nan":
+        try:
+            curr_mid, live_iv = fetch_option_live(tkr, short_strike, expiry_str, opt_type_str)
+        except Exception:
+            pass
+
+    iv_used = live_iv if not np.isnan(live_iv) else 0.35   # fallback 35%
+
+    # ── Delta (live IV via Black-Scholes) ──────────────────────────────────────
+    # Sign convention:
+    #   Short Put  = +delta (bullish: you profit when stock goes up)
+    #   Short Call = -delta (bearish)
+    #   Long Put   = -delta, Long Call = +delta
+    delta        = float("nan")
     dollar_delta = float("nan")
     try:
-        if "Put" in strat and short_strike > 0:
-            d = bs_put_delta(spot, short_strike, iv_est, dte_rem)
-            delta = -d  # short put = negative delta
-        elif "Call" in strat and short_strike > 0:
-            d = bs_call_delta(spot, short_strike, iv_est, dte_rem)
-            delta = -d  # short call = negative delta
+        if is_put and short_strike > 0:
+            d = abs(bs_put_delta(spot, short_strike, iv_used, dte_rem))
+            delta = +d if is_short else -d     # short put = +delta
+        elif is_call and short_strike > 0:
+            d = abs(bs_call_delta(spot, short_strike, iv_used, dte_rem))
+            delta = -d if is_short else +d     # short call = -delta
+
+        # Spread: long leg offsets
         if "Spread" in strat and long_strike > 0:
-            if "Put" in strat:
-                d_long = bs_put_delta(spot, long_strike, iv_est, dte_rem)
-                delta = delta + d_long  # long put offsets
-            elif "Call" in strat:
-                d_long = bs_call_delta(spot, long_strike, iv_est, dte_rem)
-                delta = delta + d_long
-        dollar_delta = delta * ctrs * 100 * spot if not np.isnan(delta) else float("nan")
+            if is_put:
+                d_long = abs(bs_put_delta(spot, long_strike, iv_used, dte_rem))
+                delta = delta - d_long  # long put = -delta, reduces net
+            elif is_call:
+                d_long = abs(bs_call_delta(spot, long_strike, iv_used, dte_rem))
+                delta = delta + d_long  # long call offsets short call
+
+        if not np.isnan(delta) and not np.isnan(spot):
+            dollar_delta = delta * ctrs * 100 * spot
     except Exception:
         pass
 
-    # Cash at risk
-    cash_sec = float(t["CASH SECURED"]) if pd.notna(t["CASH SECURED"]) else (
-        short_strike * 100 * ctrs if short_strike > 0 else 0)
-    max_loss = float(t["MAX LOSS"]) if pd.notna(t["MAX LOSS"]) else cash_sec
-
-    # Unrealized P&L (rough: for short options, use intrinsic as floor)
-    try:
-        if "Put" in strat and short_strike > 0 and not np.isnan(spot):
-            intrinsic = max(short_strike - spot, 0)
-            curr_val  = intrinsic  # rough
-            unreal = (prem - curr_val) * 100 * ctrs
-        elif "Call" in strat and short_strike > 0 and not np.isnan(spot):
-            intrinsic = max(spot - short_strike, 0)
-            curr_val  = intrinsic
-            unreal = (prem - curr_val) * 100 * ctrs
+    # ── Unrealized P&L using live mid ─────────────────────────────────────────
+    if not np.isnan(curr_mid) and prem > 0:
+        if is_short:
+            unreal = (prem - curr_mid) * 100 * ctrs   # profit when price falls
         else:
-            unreal = float("nan")
-    except Exception:
+            unreal = (curr_mid - prem) * 100 * ctrs   # profit when price rises
+    else:
         unreal = float("nan")
+
+    # ── Cash at risk / max loss ────────────────────────────────────────────────
+    cash_sec = float(t["CASH SECURED"]) if pd.notna(t.get("CASH SECURED")) else (
+        short_strike * 100 * ctrs if short_strike > 0 else 0)
+    max_loss = float(t["MAX LOSS"]) if pd.notna(t.get("MAX LOSS")) else cash_sec
 
     wl_info = wl_map.get(tkr, {})
     rows.append({
-        "ID":           t["ID"],
-        "TICKER":       tkr,
-        "STRATEGY":     strat,
-        "SECTOR":       wl_info.get("sector", "Unknown"),
-        "BUCKET":       wl_info.get("bucket", "Unknown"),
-        "SPOT":         round(spot, 2) if not np.isnan(spot) else None,
-        "SHORT STRIKE": short_strike or None,
-        "LONG STRIKE":  long_strike or None,
-        "EXPIRY":       t["EXPIRY"],
-        "DTE LEFT":     dte_rem,
-        "CONTRACTS":    ctrs,
-        "PREM/CREDIT":  prem,
-        "CASH AT RISK": cash_sec,
-        "MAX LOSS":     max_loss,
-        "DELTA (EST)":  round(delta, 3) if not np.isnan(delta) else None,
-        "$ DELTA":      round(dollar_delta, 0) if not np.isnan(dollar_delta) else None,
-        "UNREAL PNL":   round(unreal, 2) if not np.isnan(unreal) else None,
+        "ID":            t["ID"],
+        "TICKER":        tkr,
+        "STRATEGY":      strat,
+        "SECTOR":        wl_info.get("sector", "Unknown"),
+        "BUCKET":        wl_info.get("bucket", "Unknown"),
+        "SPOT":          round(spot, 2)          if not np.isnan(spot)        else None,
+        "SHORT STRIKE":  short_strike            if short_strike > 0          else None,
+        "EXPIRY":        t["EXPIRY"],
+        "DTE LEFT":      dte_rem,
+        "CONTRACTS":     ctrs,
+        "PREM RECEIVED": prem,
+        "CURRENT MID":   round(curr_mid, 2)      if not np.isnan(curr_mid)    else None,
+        "IV USED":       round(iv_used, 4),
+        "DELTA":         round(delta, 3)          if not np.isnan(delta)      else None,
+        "$ DELTA":       round(dollar_delta, 0)   if not np.isnan(dollar_delta) else None,
+        "UNREAL PNL":    round(unreal, 2)          if not np.isnan(unreal)    else None,
+        "CASH AT RISK":  cash_sec,
+        "MAX LOSS":      max_loss,
     })
 
 book = pd.DataFrame(rows)
 
 # ── Portfolio KPIs ────────────────────────────────────────────────────────────
-total_cash    = book["CASH AT RISK"].sum()
-total_max_loss= book["MAX LOSS"].sum()
-pct_deployed  = total_cash / TOTAL_CAPITAL if TOTAL_CAPITAL else 0
-cash_buffer   = 1 - pct_deployed
-total_ddelta  = pd.to_numeric(book["$ DELTA"], errors="coerce").sum()
-total_unreal  = pd.to_numeric(book["UNREAL PNL"], errors="coerce").sum()
+total_cash     = book["CASH AT RISK"].sum()
+total_max_loss = book["MAX LOSS"].sum()
+pct_deployed   = total_cash / TOTAL_CAPITAL if TOTAL_CAPITAL else 0
+cash_buffer    = 1 - pct_deployed
+total_ddelta   = pd.to_numeric(book["$ DELTA"],    errors="coerce").sum()
+total_unreal   = pd.to_numeric(book["UNREAL PNL"], errors="coerce").sum()
 
-k1,k2,k3,k4,k5 = st.columns(5)
-k1.metric("OPEN POSITIONS",    len(book))
-k2.metric("CAPITAL DEPLOYED",  f"${total_cash:,.0f}", f"{pct_deployed:.1%}")
-k3.metric("TOTAL MAX LOSS",    f"${total_max_loss:,.0f}")
-k4.metric("NET $ DELTA",       f"${total_ddelta:,.0f}")
-k5.metric("UNREAL PNL (APPROX)", f"${total_unreal:,.0f}")
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("OPEN POSITIONS",       len(book))
+k2.metric("CAPITAL DEPLOYED",     f"${total_cash:,.0f}",    f"{pct_deployed:.1%}")
+k3.metric("TOTAL MAX LOSS",       f"${total_max_loss:,.0f}")
+k4.metric("NET $ DELTA",          f"${total_ddelta:,.0f}",
+          help="Σ delta × contracts × 100 × spot  |  +ve = net bullish")
+k5.metric("UNREAL PNL (MID)",     f"${total_unreal:,.0f}",
+          help="(Premium received − current mid) × 100 × contracts")
 
-st.caption("Delta estimated using 35% flat IV proxy — use broker for accurate Greeks.")
 st.markdown("---")
 
 # ── Position table ────────────────────────────────────────────────────────────
@@ -171,22 +204,32 @@ def color_pnl(v):
     try: return "color:#00e676" if float(v) > 0 else "color:#ff4444" if float(v) < 0 else ""
     except: return ""
 
+def color_delta(v):
+    try:
+        f = float(v)
+        return "color:#00e676" if f > 0 else "color:#ff4444" if f < 0 else ""
+    except: return ""
+
+fmt = {
+    "SPOT":          "${:.2f}",
+    "SHORT STRIKE":  "${:.2f}",
+    "PREM RECEIVED": "${:.2f}",
+    "CURRENT MID":   "${:.2f}",
+    "IV USED":       "{:.1%}",
+    "DELTA":         "{:+.3f}",
+    "$ DELTA":       "${:,.0f}",
+    "CASH AT RISK":  "${:,.0f}",
+    "MAX LOSS":      "${:,.0f}",
+    "UNREAL PNL":    "${:,.0f}",
+}
 styled_book = (book.style
-    .map(color_dte,  subset=["DTE LEFT"])
-    .map(color_pnl,  subset=["UNREAL PNL"])
-    .format({
-        "SPOT":         "${:.2f}",
-        "SHORT STRIKE": "${:.2f}",
-        "LONG STRIKE":  "${:.2f}",
-        "PREM/CREDIT":  "${:.2f}",
-        "CASH AT RISK": "${:,.0f}",
-        "MAX LOSS":     "${:,.0f}",
-        "$ DELTA":      "${:,.0f}",
-        "UNREAL PNL":   "${:,.0f}",
-        "DELTA (EST)":  "{:.3f}",
-    }, na_rep="—"))
+    .map(color_dte,   subset=["DTE LEFT"])
+    .map(color_pnl,   subset=["UNREAL PNL"])
+    .map(color_delta, subset=["DELTA"])
+    .format(fmt, na_rep="—"))
 
 st.dataframe(styled_book, use_container_width=True, hide_index=True)
+st.caption("DELTA SIGN: +ve = bullish (short put / long call) | -ve = bearish (short call / long put)  |  IV from live option chain, fallback 35%")
 
 st.markdown("---")
 
@@ -215,7 +258,7 @@ st.dataframe(
     use_container_width=True, hide_index=True
 )
 
-# ── Delta & cash by sector ────────────────────────────────────────────────────
+# ── Exposure by sector ────────────────────────────────────────────────────────
 st.markdown("### EXPOSURE BY SECTOR")
 by_sector = book.groupby("SECTOR").agg(
     CASH=("CASH AT RISK","sum"),
@@ -223,7 +266,7 @@ by_sector = book.groupby("SECTOR").agg(
     POSITIONS=("ID","count"),
 ).reset_index()
 by_sector["% OF CAPITAL"] = by_sector["CASH"] / TOTAL_CAPITAL
-by_sector["OVER LIMIT"] = by_sector["% OF CAPITAL"] > MAX_SECTOR
+by_sector["OVER LIMIT"]   = by_sector["% OF CAPITAL"] > MAX_SECTOR
 
 st.dataframe(
     by_sector.style
@@ -259,25 +302,16 @@ checks = [
      abs(total_ddelta), MAX_DELTA_TOTAL),
 ]
 
-# Single-name breaches
-name_breaches = delta_by_name[delta_by_name["OVER LIMIT"]]
-checks.append((
-    "SINGLE-NAME LIMITS",
-    name_breaches.empty,
+name_breaches   = delta_by_name[delta_by_name["OVER LIMIT"]]
+sector_breaches = by_sector[by_sector["OVER LIMIT"]]
+checks.append(("SINGLE-NAME LIMITS", name_breaches.empty,
     "ALL OK" if name_breaches.empty else
     " | ".join(f"{r['TICKER']} {r['% OF CAPITAL']:.1%}" for _, r in name_breaches.iterrows()),
-    None, None
-))
-
-# Sector breaches
-sector_breaches = by_sector[by_sector["OVER LIMIT"]]
-checks.append((
-    "SECTOR LIMITS",
-    sector_breaches.empty,
+    None, None))
+checks.append(("SECTOR LIMITS", sector_breaches.empty,
     "ALL OK" if sector_breaches.empty else
     " | ".join(f"{r['SECTOR']} {r['% OF CAPITAL']:.1%}" for _, r in sector_breaches.iterrows()),
-    None, None
-))
+    None, None))
 
 all_pass = all(ok for _, ok, _, _, _ in checks)
 if all_pass:
@@ -298,9 +332,9 @@ for label, ok, detail, val, lim in checks:
         bar_color = "#ff4444" if val > lim else "#ff9900" if val > lim * 0.85 else "#00c8ff"
         c_bar.markdown(
             f"""<div style='background:#1a1a1a;height:10px;border:1px solid #222;margin-top:6px'>
-            <div style='background:{bar_color};height:10%;width:{fill/1.5*100:.0f}%;'></div>
+            <div style='background:{bar_color};height:100%;width:{fill/1.5*100:.0f}%;'></div>
             </div>""",
             unsafe_allow_html=True)
 
 st.markdown("---")
-st.caption("DELTA ESTIMATED WITH 35% FLAT IV — FOR ACCURATE GREEKS USE BROKER | UNREAL PNL = INTRINSIC ONLY APPROXIMATION")
+st.caption("IV FROM LIVE OPTION CHAIN (1-MIN CACHE) | DELTA USES BLACK-SCHOLES EUROPEAN APPROX | NOT EXECUTION READY")

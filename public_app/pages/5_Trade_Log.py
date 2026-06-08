@@ -1,12 +1,10 @@
 """
-Trade Log — record all trades, export/import CSV for persistence between sessions.
-Supports: Short Put, Covered Call, Bear Call Spread, Bull Put Spread, Long Put, Long Call.
+Trade Log — all strategies, auto-calculated fields, CSV export/import.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import datetime
-import io
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -25,184 +23,227 @@ with c_nav1:
     if st.button("HOME"): st.switch_page("app.py")
 
 st.title("TRADE LOG")
-st.caption("ALL STRATEGIES | EXPORT CSV TO SAVE | IMPORT CSV TO RESTORE BETWEEN SESSIONS")
+st.caption("DTE, CASH SECURED, AND MAX LOSS ARE AUTO-CALCULATED FROM YOUR INPUTS | EXPORT CSV TO SAVE BETWEEN SESSIONS")
 
-# ── Session trade store ───────────────────────────────────────────────────────
+# ── Session store ─────────────────────────────────────────────────────────────
 COLUMNS = [
-    "ID", "DATE OPENED", "TICKER", "STRATEGY",
-    "SHORT STRIKE", "LONG STRIKE", "EXPIRY", "DTE OPEN",
-    "CONTRACTS", "PREMIUM / CREDIT", "CASH SECURED", "MAX LOSS",
-    "STATUS", "DATE CLOSED", "CLOSE PRICE", "REALIZED PNL", "NOTES"
+    "ID","DATE OPENED","TICKER","STRATEGY",
+    "SHORT STRIKE","LONG STRIKE","EXPIRY","DTE OPEN",
+    "CONTRACTS","PREMIUM / CREDIT","CASH SECURED","MAX LOSS",
+    "STATUS","DATE CLOSED","CLOSE PRICE","REALIZED PNL","NOTES"
 ]
 
-def empty_df():
-    return pd.DataFrame(columns=COLUMNS)
-
 if "trades" not in st.session_state:
-    st.session_state["trades"] = empty_df()
+    st.session_state["trades"] = pd.DataFrame(columns=COLUMNS)
 
 trades: pd.DataFrame = st.session_state["trades"]
 
 # ── Import / Export ───────────────────────────────────────────────────────────
-col_imp, col_exp, _ = st.columns([2, 2, 6])
-
-with col_imp:
-    uploaded = st.file_uploader("IMPORT CSV", type="csv", label_visibility="collapsed",
-                                help="Upload a previously exported trade log CSV")
+c_imp, c_exp, _ = st.columns([2, 2, 6])
+with c_imp:
+    uploaded = st.file_uploader("IMPORT CSV", type="csv", label_visibility="collapsed")
     if uploaded:
         try:
             loaded = pd.read_csv(uploaded)
             st.session_state["trades"] = loaded
+            trades = loaded
             st.success(f"Loaded {len(loaded)} trades.")
             st.rerun()
         except Exception as e:
-            st.error(f"Failed to load: {e}")
-
-with col_exp:
+            st.error(f"Failed: {e}")
+with c_exp:
     st.markdown(" ")
     if not trades.empty:
-        csv_bytes = trades.to_csv(index=False).encode()
-        st.download_button(
-            "EXPORT CSV",
-            data=csv_bytes,
-            file_name=f"trade_log_{datetime.date.today()}.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+        st.download_button("EXPORT CSV", trades.to_csv(index=False).encode(),
+                           f"trades_{datetime.date.today()}.csv", "text/csv",
+                           use_container_width=True, type="primary")
 
 st.markdown("---")
 
-# ── Add trade form ────────────────────────────────────────────────────────────
+# ── Strategy definitions (drives auto-calc logic) ─────────────────────────────
+STRATEGIES = {
+    "Short Put":                  {"legs":"single","type":"put", "short":True},
+    "Cash-Secured Put (Wheel)":   {"legs":"single","type":"put", "short":True},
+    "Bull Put Spread":            {"legs":"spread","type":"put", "short":True},
+    "Covered Call":               {"legs":"single","type":"call","short":True},
+    "Bear Call Spread":           {"legs":"spread","type":"call","short":True},
+    "Long Put (Hedge)":           {"legs":"single","type":"put", "short":False},
+    "Long Call":                  {"legs":"single","type":"call","short":False},
+}
+
+STRAT_NAMES = list(STRATEGIES.keys())
+
+# ── Auto-calc preview (outside form so it updates live) ───────────────────────
 st.markdown("### NEW TRADE")
 
-STRATEGIES = [
-    "Short Put",
-    "Covered Call",
-    "Bear Call Spread",
-    "Bull Put Spread",
-    "Long Put (Hedge)",
-    "Long Call",
-    "Cash-Secured Put (Wheel)",
-]
+# Use session keys so values persist across reruns while filling the form
+def ss(key, default): return st.session_state.setdefault(f"nt_{key}", default)
 
-with st.form("new_trade_form", clear_on_submit=True):
-    r1c1, r1c2, r1c3, r1c4 = st.columns(4)
-    date_opened = r1c1.date_input("DATE OPENED", datetime.date.today())
-    ticker      = r1c2.text_input("TICKER").upper().strip()
-    strategy    = r1c3.selectbox("STRATEGY", STRATEGIES)
-    contracts   = r1c4.number_input("CONTRACTS", min_value=1, value=1)
+cc1, cc2, cc3, cc4 = st.columns(4)
+nt_date     = cc1.date_input("DATE OPENED", datetime.date.today(), key="nt_date")
+nt_ticker   = cc2.text_input("TICKER", key="nt_ticker").upper().strip()
+nt_strategy = cc3.selectbox("STRATEGY", STRAT_NAMES, key="nt_strategy")
+nt_contracts= cc4.number_input("CONTRACTS", min_value=1, value=1, key="nt_contracts")
 
-    r2c1, r2c2, r2c3, r2c4 = st.columns(4)
-    short_strike = r2c1.number_input("SHORT STRIKE (sell leg)", min_value=0.0, step=0.50)
-    long_strike  = r2c2.number_input("LONG STRIKE (buy leg — spreads only)", min_value=0.0, step=0.50,
-                                     help="Leave 0 for single-leg trades")
-    expiry       = r2c3.text_input("EXPIRY (YYYY-MM-DD)")
-    dte_open     = r2c4.number_input("DTE AT OPEN", min_value=1, max_value=365, value=35)
+sc1, sc2, sc3 = st.columns(3)
+strat_def = STRATEGIES[nt_strategy]
+is_spread = strat_def["legs"] == "spread"
 
-    r3c1, r3c2, r3c3, r3c4 = st.columns(4)
-    premium      = r3c1.number_input("PREMIUM / NET CREDIT (per share)", min_value=0.0, step=0.01,
-                                     help="For spreads: net credit received per share")
-    cash_secured = r3c2.number_input("CASH SECURED ($)", min_value=0.0, step=100.0,
-                                     help="For puts: strike × 100 × contracts")
-    max_loss_in  = r3c3.number_input("MAX LOSS ($)", min_value=0.0, step=100.0,
-                                     help="For spreads: (width - credit) × 100 × contracts")
-    notes        = r3c4.text_input("NOTES / SIGNAL TAG")
+nt_short_strike = sc1.number_input("SHORT STRIKE (sell leg)", min_value=0.0, step=0.50, key="nt_short_strike")
+nt_long_strike  = sc2.number_input(
+    "LONG STRIKE (buy leg)" + (" — SPREADS ONLY" if is_spread else " — not needed"),
+    min_value=0.0, step=0.50, key="nt_long_strike",
+    disabled=not is_spread,
+    help="Only for spreads — the strike you buy as protection"
+)
+nt_expiry = sc3.date_input("EXPIRY DATE", datetime.date.today() + datetime.timedelta(days=35), key="nt_expiry")
 
-    submitted = st.form_submit_button("ADD TRADE", type="primary", use_container_width=True)
+pc1, pc2 = st.columns(2)
+nt_premium = pc1.number_input("PREMIUM / NET CREDIT (per share)", min_value=0.0, step=0.01, key="nt_premium",
+                               help="For short options: credit received per share. For spreads: net credit = sell leg − buy leg.")
+nt_notes   = pc2.text_input("NOTES / SIGNAL", key="nt_notes")
 
-if submitted and ticker:
-    # Auto-calculate cash secured and max loss for common cases
-    if cash_secured == 0 and strategy in ["Short Put", "Cash-Secured Put (Wheel)"]:
-        cash_secured = short_strike * 100 * contracts
-    if max_loss_in == 0 and long_strike > 0:
-        spread_w = abs(long_strike - short_strike)
-        max_loss_in = (spread_w - premium) * 100 * contracts
+# Auto-calculations
+nt_dte = max((nt_expiry - datetime.date.today()).days, 0)
 
-    new_id = len(trades) + 1
-    new_row = {
-        "ID":               new_id,
-        "DATE OPENED":      date_opened.isoformat(),
-        "TICKER":           ticker,
-        "STRATEGY":         strategy,
-        "SHORT STRIKE":     short_strike if short_strike > 0 else None,
-        "LONG STRIKE":      long_strike if long_strike > 0 else None,
-        "EXPIRY":           expiry,
-        "DTE OPEN":         dte_open,
-        "CONTRACTS":        contracts,
-        "PREMIUM / CREDIT": premium,
-        "CASH SECURED":     cash_secured if cash_secured > 0 else None,
-        "MAX LOSS":         max_loss_in if max_loss_in > 0 else None,
-        "STATUS":           "OPEN",
-        "DATE CLOSED":      None,
-        "CLOSE PRICE":      None,
-        "REALIZED PNL":     None,
-        "NOTES":            notes,
-    }
-    st.session_state["trades"] = pd.concat(
-        [trades, pd.DataFrame([new_row])], ignore_index=True)
-    st.success(f"Trade added: {strategy} on {ticker}")
-    st.rerun()
+if strat_def["type"] == "put" and strat_def["short"] and not is_spread:
+    # Short Put / Wheel: cash secured = strike × 100 × contracts
+    nt_cash_secured = nt_short_strike * 100 * nt_contracts
+    nt_max_loss = nt_cash_secured  # worst case: stock to zero
+    cash_note = f"Strike × 100 × contracts = ${nt_cash_secured:,.0f}"
+    loss_note = f"Same as cash secured (stock → $0) = ${nt_max_loss:,.0f}"
+
+elif is_spread and nt_long_strike > 0 and nt_short_strike > 0:
+    # Spread: max loss = (width - net credit) × 100 × contracts
+    spread_width = abs(nt_long_strike - nt_short_strike)
+    nt_cash_secured = 0.0
+    nt_max_loss = max((spread_width - nt_premium) * 100 * nt_contracts, 0)
+    cash_note = "N/A (spread — margin = max loss)"
+    loss_note = f"(Width ${spread_width:.2f} − Credit ${nt_premium:.2f}) × 100 × {nt_contracts} = ${nt_max_loss:,.0f}"
+
+elif strat_def["type"] == "call" and strat_def["short"] and not is_spread:
+    # Covered Call: no extra cash needed (you own the stock)
+    nt_cash_secured = 0.0
+    nt_max_loss = 0.0  # capped by stock ownership
+    cash_note = "N/A — you own the underlying"
+    loss_note = "Capped by stock ownership (opportunity cost only)"
+
+else:
+    nt_cash_secured = nt_short_strike * 100 * nt_contracts if nt_short_strike > 0 else 0
+    nt_max_loss = nt_premium * 100 * nt_contracts if not strat_def["short"] else nt_cash_secured
+    cash_note = f"${nt_cash_secured:,.0f}"
+    loss_note = f"${nt_max_loss:,.0f}"
+
+# Preview calculated values
+pc3, pc4, pc5, pc6 = st.columns(4)
+pc3.metric("DTE (AUTO)", nt_dte, help="Expiry date − today")
+pc4.metric("CASH SECURED (AUTO)", f"${nt_cash_secured:,.0f}", help=cash_note)
+pc5.metric("MAX LOSS (AUTO)", f"${nt_max_loss:,.0f}", help=loss_note)
+pc6.metric("TOTAL CREDIT ($)", f"${nt_premium*100*nt_contracts:,.0f}",
+           help="Premium per share × 100 × contracts")
+
+if st.button("ADD TRADE", type="primary", use_container_width=False):
+    if not nt_ticker:
+        st.error("Enter a ticker.")
+    else:
+        new_id = (int(trades["ID"].max()) + 1) if not trades.empty and "ID" in trades.columns else 1
+        new_row = {
+            "ID":               new_id,
+            "DATE OPENED":      nt_date.isoformat(),
+            "TICKER":           nt_ticker,
+            "STRATEGY":         nt_strategy,
+            "SHORT STRIKE":     nt_short_strike if nt_short_strike > 0 else None,
+            "LONG STRIKE":      nt_long_strike  if is_spread and nt_long_strike > 0 else None,
+            "EXPIRY":           nt_expiry.isoformat(),
+            "DTE OPEN":         nt_dte,
+            "CONTRACTS":        nt_contracts,
+            "PREMIUM / CREDIT": nt_premium,
+            "CASH SECURED":     nt_cash_secured if nt_cash_secured > 0 else None,
+            "MAX LOSS":         nt_max_loss     if nt_max_loss > 0 else None,
+            "STATUS":           "OPEN",
+            "DATE CLOSED":      None,
+            "CLOSE PRICE":      None,
+            "REALIZED PNL":     None,
+            "NOTES":            nt_notes,
+        }
+        st.session_state["trades"] = pd.concat(
+            [trades, pd.DataFrame([new_row])], ignore_index=True)
+        st.success(f"Added: {nt_strategy} on {nt_ticker} | Strike ${nt_short_strike:.2f} | Expiry {nt_expiry} | Credit ${nt_premium*100*nt_contracts:,.0f}")
+        st.rerun()
 
 # ── Close a trade ─────────────────────────────────────────────────────────────
 st.markdown("---")
 st.markdown("### CLOSE / EXPIRE A TRADE")
 
-open_trades = trades[trades["STATUS"] == "OPEN"] if not trades.empty else empty_df()
+trades = st.session_state["trades"]
+open_trades = trades[trades["STATUS"] == "OPEN"].copy() if not trades.empty else pd.DataFrame()
 
 if not open_trades.empty:
-    with st.form("close_trade_form", clear_on_submit=True):
-        cc1, cc2, cc3, cc4 = st.columns(4)
-        close_id     = cc1.selectbox("TRADE ID TO CLOSE",
-                                     options=open_trades["ID"].tolist(),
-                                     format_func=lambda i: f"#{i} {open_trades[open_trades['ID']==i]['TICKER'].values[0]} {open_trades[open_trades['ID']==i]['STRATEGY'].values[0]}")
-        close_status = cc2.selectbox("OUTCOME", ["EXPIRED (FULL PROFIT)", "CLOSED EARLY", "ASSIGNED / EXERCISED", "ROLLED"])
-        close_price  = cc3.number_input("CLOSE / BUYBACK PRICE (per share)", min_value=0.0, step=0.01)
-        close_date   = cc4.date_input("DATE CLOSED", datetime.date.today())
+    cx1, cx2, cx3, cx4 = st.columns(4)
+    close_id = cx1.selectbox(
+        "SELECT TRADE",
+        open_trades["ID"].tolist(),
+        format_func=lambda i: f"#{i}  {open_trades[open_trades['ID']==i]['TICKER'].values[0]}  {open_trades[open_trades['ID']==i]['STRATEGY'].values[0]}  {open_trades[open_trades['ID']==i]['EXPIRY'].values[0]}"
+    )
+    close_status = cx2.selectbox("OUTCOME", [
+        "EXPIRED WORTHLESS (MAX PROFIT)",
+        "CLOSED EARLY",
+        "ASSIGNED / EXERCISED",
+        "ROLLED",
+        "STOP LOSS HIT",
+    ])
+    close_price = cx3.number_input("BUYBACK / CLOSE PRICE (per share)", min_value=0.0, step=0.01,
+                                   help="For short options: premium to buy back. 0 if expired worthless.")
+    close_date  = cx4.date_input("DATE CLOSED", datetime.date.today(), key="close_date")
 
-        close_sub = st.form_submit_button("CLOSE TRADE", type="primary", use_container_width=True)
-
-    if close_sub:
+    if close_id:
         row = trades[trades["ID"] == close_id].iloc[0]
-        prem_orig = float(row["PREMIUM / CREDIT"] or 0)
-        ctrs = int(row["CONTRACTS"])
-        is_short = row["STRATEGY"] not in ["Long Put (Hedge)", "Long Call"]
-        if is_short:
-            realized = (prem_orig - close_price) * 100 * ctrs
-        else:
-            realized = (close_price - prem_orig) * 100 * ctrs
+        prem_orig  = float(row["PREMIUM / CREDIT"] or 0)
+        ctrs       = int(row["CONTRACTS"])
+        is_short   = STRATEGIES.get(str(row["STRATEGY"]), {}).get("short", True)
+        realized   = (prem_orig - close_price) * 100 * ctrs if is_short else (close_price - prem_orig) * 100 * ctrs
+        max_l      = float(row["MAX LOSS"]) if pd.notna(row["MAX LOSS"]) and row["MAX LOSS"] else 0
+        return_pct = realized / max_l if max_l else 0
 
+        st.info(f"REALIZED P&L: **${realized:,.2f}**  |  Return on capital: **{return_pct:.1%}**")
+
+    if st.button("CLOSE TRADE", type="primary"):
+        row = trades[trades["ID"] == close_id].iloc[0]
+        prem_orig  = float(row["PREMIUM / CREDIT"] or 0)
+        ctrs       = int(row["CONTRACTS"])
+        is_short   = STRATEGIES.get(str(row["STRATEGY"]), {}).get("short", True)
+        realized   = (prem_orig - close_price) * 100 * ctrs if is_short else (close_price - prem_orig) * 100 * ctrs
         idx = trades[trades["ID"] == close_id].index[0]
-        trades.at[idx, "STATUS"]       = close_status
-        trades.at[idx, "DATE CLOSED"]  = close_date.isoformat()
-        trades.at[idx, "CLOSE PRICE"]  = close_price
-        trades.at[idx, "REALIZED PNL"] = round(realized, 2)
+        trades.at[idx, "STATUS"]      = close_status
+        trades.at[idx, "DATE CLOSED"] = close_date.isoformat()
+        trades.at[idx, "CLOSE PRICE"] = close_price
+        trades.at[idx, "REALIZED PNL"]= round(realized, 2)
         st.session_state["trades"] = trades
-        st.success(f"Trade #{close_id} closed. Realized P&L: ${realized:,.2f}")
+        st.success(f"Trade #{close_id} closed. P&L: ${realized:,.2f}")
         st.rerun()
 else:
-    st.caption("No open trades to close.")
+    st.caption("No open trades.")
 
-# ── Summary KPIs ──────────────────────────────────────────────────────────────
+# ── Summary ───────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown("### SUMMARY")
+trades = st.session_state["trades"]
 
 if not trades.empty:
-    open_ct   = (trades["STATUS"] == "OPEN").sum()
-    closed_ct = (trades["STATUS"] != "OPEN").sum()
-    total_pnl = pd.to_numeric(trades["REALIZED PNL"], errors="coerce").sum()
-    total_prem= pd.to_numeric(trades["PREMIUM / CREDIT"], errors="coerce").sum() * 100  # rough total credits
+    open_ct    = (trades["STATUS"] == "OPEN").sum()
+    closed_ct  = (trades["STATUS"] != "OPEN").sum()
+    total_pnl  = pd.to_numeric(trades["REALIZED PNL"], errors="coerce").sum()
+    total_cred = (pd.to_numeric(trades["PREMIUM / CREDIT"], errors="coerce") *
+                  pd.to_numeric(trades["CONTRACTS"], errors="coerce")).sum() * 100
 
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("OPEN TRADES",    open_ct)
-    k2.metric("CLOSED TRADES",  closed_ct)
+    k1,k2,k3,k4 = st.columns(4)
+    k1.metric("OPEN",           open_ct)
+    k2.metric("CLOSED",         closed_ct)
     k3.metric("REALIZED P&L",   f"${total_pnl:,.2f}")
-    k4.metric("TOTAL PREMIUM COLLECTED (APPROX)", f"${total_prem:,.0f}")
+    k4.metric("TOTAL CREDITS COLLECTED", f"${total_cred:,.0f}")
 
     st.markdown("---")
-
-    # ── Full trade table (editable) ───────────────────────────────────────────
     st.markdown("### ALL TRADES")
-    st.caption("You can edit cells directly in the table below.")
+    st.caption("Edit cells directly. Changes save automatically to this session.")
 
     edited = st.data_editor(
         trades,
@@ -210,33 +251,31 @@ if not trades.empty:
         hide_index=True,
         num_rows="dynamic",
         column_config={
-            "STATUS": st.column_config.SelectboxColumn(
-                "STATUS",
-                options=["OPEN","EXPIRED (FULL PROFIT)","CLOSED EARLY","ASSIGNED / EXERCISED","ROLLED"],
-            ),
-            "REALIZED PNL": st.column_config.NumberColumn("REALIZED PNL", format="$%.2f"),
-            "PREMIUM / CREDIT": st.column_config.NumberColumn("PREMIUM / CREDIT", format="$%.2f"),
-            "CASH SECURED": st.column_config.NumberColumn("CASH SECURED", format="$%.0f"),
-            "MAX LOSS": st.column_config.NumberColumn("MAX LOSS", format="$%.0f"),
+            "STATUS": st.column_config.SelectboxColumn("STATUS", options=[
+                "OPEN","EXPIRED WORTHLESS (MAX PROFIT)","CLOSED EARLY",
+                "ASSIGNED / EXERCISED","ROLLED","STOP LOSS HIT"]),
+            "REALIZED PNL":     st.column_config.NumberColumn(format="$%.2f"),
+            "PREMIUM / CREDIT": st.column_config.NumberColumn(format="$%.2f"),
+            "CASH SECURED":     st.column_config.NumberColumn(format="$%.0f"),
+            "MAX LOSS":         st.column_config.NumberColumn(format="$%.0f"),
         }
     )
     if not edited.equals(trades):
         st.session_state["trades"] = edited
         st.rerun()
 
-    # ── P&L by strategy ───────────────────────────────────────────────────────
+    # P&L by strategy
     closed = trades[trades["STATUS"] != "OPEN"].copy()
     if not closed.empty:
         closed["REALIZED PNL"] = pd.to_numeric(closed["REALIZED PNL"], errors="coerce")
-        by_strat = closed.groupby("STRATEGY")["REALIZED PNL"].agg(["sum","count"]).reset_index()
-        by_strat.columns = ["STRATEGY", "TOTAL PNL", "TRADES"]
+        by_strat = closed.groupby("STRATEGY")["REALIZED PNL"].agg(["sum","count","mean"]).reset_index()
+        by_strat.columns = ["STRATEGY","TOTAL PNL","TRADES","AVG PNL"]
         st.markdown("### P&L BY STRATEGY")
         st.dataframe(
-            by_strat.style.format({"TOTAL PNL": "${:,.2f}"}),
-            use_container_width=True, hide_index=True
-        )
+            by_strat.style.format({"TOTAL PNL":"${:,.2f}","AVG PNL":"${:,.2f}"}),
+            use_container_width=True, hide_index=True)
 else:
-    st.info("No trades logged yet. Add your first trade above.")
+    st.info("No trades yet. Add your first trade above.")
 
 st.markdown("---")
-st.caption("DATA IS SESSION-ONLY — EXPORT CSV BEFORE CLOSING THE BROWSER TO SAVE YOUR TRADES")
+st.caption("SESSION ONLY — EXPORT CSV BEFORE CLOSING BROWSER")

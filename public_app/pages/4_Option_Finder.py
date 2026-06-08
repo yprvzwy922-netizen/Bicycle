@@ -52,6 +52,32 @@ for row_i in range(rows_needed):
                           type="primary" if is_sel else "secondary"):
                 st.session_state["finder_ticker"] = tkr
                 st.rerun()
+        elif idx == len(wl_tickers):
+            # "+" quick-add button at the end of the last ticker
+            if col.button("＋", key="qb_plus", use_container_width=True,
+                          help="Quick-add a new ticker to the watchlist",
+                          type="secondary"):
+                st.session_state["show_quick_add"] = True
+
+# Quick-add inline form (shows below grid when "+" is pressed)
+if st.session_state.get("show_quick_add"):
+    with st.container():
+        st.markdown("**QUICK ADD TICKER TO WATCHLIST**")
+        qa1, qa2, qa3, qa4, qa5, qa6, qa7 = st.columns([2,2,2,2,1,1,1])
+        qa_tick = qa1.text_input("TICKER", key="qa_tick").upper().strip()
+        qa_co   = qa2.text_input("COMPANY NAME", key="qa_co")
+        qa_sec  = qa3.selectbox("SECTOR", SECTORS, key="qa_sec")
+        qa_bkt  = qa4.selectbox("BUCKET", ["Core","Growth","Speculative"], key="qa_bkt")
+        qa_conv = qa5.number_input("CONVICTION", 1, 5, 3, key="qa_conv")
+        qa_band = qa6.selectbox("BAND", ["Income","Wheel"], key="qa_band")
+        qa7.markdown(" ")
+        qa7.markdown(" ")
+        if qa7.button("ADD", type="primary", use_container_width=True) and qa_tick:
+            add_to_watchlist(qa_tick, qa_co, qa_sec, qa_bkt, qa_conv, qa_band)
+            st.session_state["finder_ticker"] = qa_tick
+            st.session_state["show_quick_add"] = False
+            st.success(f"{qa_tick} added to watchlist.")
+            st.rerun()
 
 st.markdown("---")
 
