@@ -88,8 +88,10 @@ with c1:
     if custom: st.session_state["finder_ticker"] = custom
     ticker = st.session_state.get("finder_ticker", "")
 with c2:
-    tenor = st.selectbox("TENOR", ["1M (~35 DTE)","3M (~90 DTE)","6M (~180 DTE)","CUSTOM"])
-    dte_map = {"1M (~35 DTE)":35,"3M (~90 DTE)":90,"6M (~180 DTE)":180}
+    tenor = st.selectbox("TENOR", ["1M (~30 DTE)","45 DAYS","3M (MONTHLY)","6M (MONTHLY)","CUSTOM"])
+    dte_map = {"1M (~30 DTE)":30,"45 DAYS":45,"3M (MONTHLY)":90,"6M (MONTHLY)":180}
+    # 3M / 6M snap to the standard 3rd-Friday monthly contract (deepest liquidity)
+    monthly_only = tenor in ("3M (MONTHLY)","6M (MONTHLY)")
     target_dte = dte_map.get(tenor, st.number_input("DTE", 7, 365, 35) if tenor=="CUSTOM" else 35)
 with c3:
     opt_type = st.selectbox("OPTION TYPE", ["PUTS","CALLS"])
@@ -155,7 +157,7 @@ if not run:
 with st.spinner(f"FETCHING {ticker}..."):
     spot = fetch_spot(ticker)
     opt  = "put" if opt_type == "PUTS" else "call"
-    chain, expiry, dte = fetch_chain(ticker, target_dte, opt)
+    chain, expiry, dte = fetch_chain(ticker, target_dte, opt, monthly_only=monthly_only)
 
 if chain is None or chain.empty:
     st.error(f"No options data found for {ticker}.")

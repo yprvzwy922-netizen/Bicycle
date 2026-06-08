@@ -28,6 +28,7 @@ DEFAULT_WATCHLIST = [
     {"ticker": "AMD",   "company": "Advanced Micro Devices",  "sector": "Semiconductors",       "bucket": "Growth",      "conviction": 4, "delta_band": "Wheel"},
     {"ticker": "GOOG",  "company": "Alphabet",                "sector": "Technology",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
     {"ticker": "BB",    "company": "BlackBerry",              "sector": "Technology",           "bucket": "Growth",      "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "UBER",  "company": "Uber Technologies",       "sector": "Technology",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
     {"ticker": "LLY",   "company": "Eli Lilly",               "sector": "Healthcare",           "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
     {"ticker": "NVO",   "company": "Novo Nordisk",            "sector": "Healthcare",           "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
     {"ticker": "AMGN",  "company": "Amgen",                   "sector": "Healthcare",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
@@ -156,14 +157,28 @@ def fetch_expirations(tkr):
     except Exception:
         return []
 
+def is_third_friday(d: datetime.date) -> bool:
+    """True if date is the 3rd Friday of its month (standard monthly option expiry)."""
+    return d.weekday() == 4 and 15 <= d.day <= 21
+
 @st.cache_data(ttl=300, show_spinner=False)
-def fetch_chain(tkr, target_dte, option_type="put"):
+def fetch_chain(tkr, target_dte, option_type="put", monthly_only=False):
     try:
         t = yf.Ticker(tkr)
         exps = list(t.options)
         if not exps: return None, None, None
         today = datetime.date.today()
-        best = min(exps, key=lambda e: abs(
+
+        # For longer tenors, restrict to standard monthly contracts (3rd Friday),
+        # which carry the deepest liquidity. Fall back to all if none qualify.
+        candidates = exps
+        if monthly_only:
+            monthlies = [e for e in exps
+                         if is_third_friday(datetime.datetime.strptime(e, "%Y-%m-%d").date())]
+            if monthlies:
+                candidates = monthlies
+
+        best = min(candidates, key=lambda e: abs(
             (datetime.datetime.strptime(e, "%Y-%m-%d").date() - today).days - target_dte))
         dte = (datetime.datetime.strptime(best, "%Y-%m-%d").date() - today).days
         raw = t.option_chain(best)
