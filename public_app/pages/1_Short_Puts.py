@@ -98,6 +98,7 @@ for i, w in enumerate(wl):
             "1M EXPIRY":     p1.get("expiry"),
             "1M DTE":        p1.get("dte"),
             "1M OI":         p1.get("oi"),
+            "1M SPREAD":     p1.get("spread_pct"),
             "STRIKE SCORE":  p1.get("score"),
             "SCORE":         sc,
             "VERDICT":       vd,
@@ -124,7 +125,8 @@ if f_earn:     df = df[~df["EARN WARN"].fillna(False)]
 if f_min_yld:  df = df[df["1M ANN YLD"].fillna(0) >= f_min_yld]
 if f_max_delt < 0.60: df = df[df["1M DELTA"].fillna(1.0) <= f_max_delt]
 if f_min_oi:   df = df[df["1M OI"].fillna(0) >= f_min_oi]
-if f_max_sp < 0.50:   df = df[df["1M ANN YLD"].notna()]  # crude proxy for liquid
+# Real bid/ask spread filter (NaN spread = unknown liquidity → treat as wide, exclude)
+if f_max_sp < 0.50:   df = df[df["1M SPREAD"].fillna(1.0) <= f_max_sp]
 if f_min_cush: df = df[df["1M CUSHION"].fillna(0) >= f_min_cush]
 if f_buckets:  df = df[df["BUCKET"].isin(f_buckets)]
 if f_sectors:  df = df[df["SECTOR"].isin(f_sectors)]
@@ -147,7 +149,7 @@ st.markdown("---")
 # COMPANY and SECTOR are kept in df for filtering but hidden from the table.
 # 3M columns are hidden for now — short put strategy is run on the 1M (35 DTE) tenor.
 SHOW = ["TICKER","PRICE","TREND","IV RANK","EARN DAYS","BAND",
-        "1M STRIKE","1M DELTA","1M IV","1M ANN YLD","1M CUSHION","1M PREMIUM","1M EXPIRY",
+        "1M STRIKE","1M DELTA","1M IV","1M ANN YLD","1M CUSHION","1M PREMIUM","1M OI","1M SPREAD","1M EXPIRY",
         "STRIKE SCORE","SCORE","VERDICT"]
 disp = df[[c for c in SHOW if c in df.columns]].copy()
 
@@ -187,6 +189,7 @@ styled = (disp.style
         "1M ANN YLD":"{:.1%}",
         "1M CUSHION":"{:.1%}",
         "1M PREMIUM":"${:.2f}",
+        "1M SPREAD": "{:.1%}",
         "STRIKE SCORE":"{:.0f}",
         "SCORE":     "{:.2f}",
     }, na_rep="—"))

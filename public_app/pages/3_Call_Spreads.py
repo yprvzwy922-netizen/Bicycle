@@ -120,7 +120,8 @@ k3.metric("AVG NET CREDIT",   f"${avg_cr:.2f}" if not np.isnan(avg_cr) else "—
 st.markdown("---")
 
 # ── Table ─────────────────────────────────────────────────────────────────────
-SHOW = ["TICKER","COMPANY","SECTOR","PRICE","TREND","IV RANK","EARN DAYS",
+# COMPANY and SECTOR kept in df for filtering but hidden from the table
+SHOW = ["TICKER","PRICE","TREND","IV RANK","EARN DAYS",
         "SHORT STRIKE","LONG STRIKE","SHORT DELTA","SHORT IV",
         "NET CREDIT","SPREAD WIDTH","MAX LOSS","BREAKEVEN","ROC","ANN ROC","OI","EXPIRY"]
 disp = df[[c for c in SHOW if c in df.columns]].copy()

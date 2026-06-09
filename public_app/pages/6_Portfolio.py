@@ -145,10 +145,34 @@ for _, t in open_trades.iterrows():
     else:
         unreal = float("nan")
 
-    # ── Cash at risk / max loss ────────────────────────────────────────────────
-    cash_sec = float(t["CASH SECURED"]) if pd.notna(t.get("CASH SECURED")) else (
-        short_strike * 100 * ctrs if short_strike > 0 else 0)
-    max_loss = float(t["MAX LOSS"]) if pd.notna(t.get("MAX LOSS")) else cash_sec
+    # ── Cash at risk / max loss (strategy-aware) ───────────────────────────────
+    # Use the Trade Log's stored values when present, otherwise derive correctly
+    # per strategy — NEVER fall back to strike*100 for spreads/covered calls,
+    # which would massively overstate deployed capital.
+    is_spread = "Spread" in strat
+    is_covered_call = strat == "Covered Call"
+
+    stored_cash = float(t["CASH SECURED"]) if pd.notna(t.get("CASH SECURED")) else None
+    stored_loss = float(t["MAX LOSS"])     if pd.notna(t.get("MAX LOSS"))     else None
+
+    if is_spread:
+        # Defined-risk: capital at risk = max loss = (width - net credit) * 100
+        if stored_loss is not None:
+            max_loss = stored_loss
+        elif long_strike > 0 and short_strike > 0:
+            max_loss = max((abs(long_strike - short_strike) - prem) * 100 * ctrs, 0)
+        else:
+            max_loss = 0.0
+        cash_sec = max_loss                      # margin held = max loss
+    elif is_covered_call:
+        # Stock-secured, not cash-secured — no separate cash deployed here
+        cash_sec = 0.0
+        max_loss = stored_loss if stored_loss is not None else 0.0
+    else:
+        # Cash-secured put / wheel (and long single legs): strike * 100 is correct
+        cash_sec = stored_cash if stored_cash is not None else (
+            short_strike * 100 * ctrs if short_strike > 0 else 0)
+        max_loss = stored_loss if stored_loss is not None else cash_sec
 
     wl_info = wl_map.get(tkr, {})
     rows.append({
@@ -190,6 +214,9 @@ k4.metric("NET $ DELTA",          f"${total_ddelta:,.0f}",
           help="Σ delta × contracts × 100 × spot  |  +ve = net bullish")
 k5.metric("UNREAL PNL (MID)",     f"${total_unreal:,.0f}",
           help="(Premium received − current mid) × 100 × contracts")
+
+st.caption("CAPITAL DEPLOYED: cash-secured puts use strike×100; spreads use their max loss (defined risk); "
+           "covered calls count $0 (stock-secured, not cash) so they don't inflate deployment.")
 
 st.markdown("---")
 

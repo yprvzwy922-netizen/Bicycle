@@ -117,7 +117,8 @@ k3.metric("AVG UPSIDE CAP", f"{avg_cap:.1%}" if not np.isnan(avg_cap) else "—"
 st.markdown("---")
 
 # ── Table ─────────────────────────────────────────────────────────────────────
-SHOW = ["TICKER","COMPANY","SECTOR","PRICE","TREND","IV RANK","EARN DAYS",
+# COMPANY and SECTOR kept in df for filtering but hidden from the table
+SHOW = ["TICKER","PRICE","TREND","IV RANK","EARN DAYS",
         "CALL STRIKE","CALL DELTA","CALL IV","PREMIUM","ANN YIELD","UPSIDE CAP","BREAKEVEN UP","OI","EXPIRY","ILLIQUID"]
 disp = df[[c for c in SHOW if c in df.columns]].copy()
 

@@ -146,7 +146,12 @@ if st.button("ADD TRADE", type="primary", use_container_width=False):
     if not nt_ticker:
         st.error("Enter a ticker.")
     else:
-        new_id = (int(trades["ID"].max()) + 1) if not trades.empty and "ID" in trades.columns else 1
+        # Robust next-ID: handles imported CSVs missing/empty/non-numeric ID column
+        if not trades.empty and "ID" in trades.columns:
+            ids = pd.to_numeric(trades["ID"], errors="coerce").dropna()
+            new_id = int(ids.max()) + 1 if not ids.empty else 1
+        else:
+            new_id = 1
         new_row = {
             "ID":               new_id,
             "DATE OPENED":      nt_date.isoformat(),

@@ -112,10 +112,11 @@ def rv_percentile(hist):
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_spot(tkr):
     try:
-        info = yf.Ticker(tkr).fast_info
+        t = yf.Ticker(tkr)
+        info = t.fast_info
         p = getattr(info, "last_price", None) or getattr(info, "regularMarketPrice", None)
         if p is None:
-            h = yf.Ticker(tkr).history(period="2d")
+            h = t.history(period="2d")
             p = float(h["Close"].iloc[-1]) if not h.empty else float("nan")
         return float(p)
     except Exception:
@@ -128,7 +129,6 @@ def fetch_hist(tkr):
     except Exception:
         return pd.DataFrame()
 
-@st.cache_data(ttl=3600, show_spinner=False)
 def _as_date(d):
     """Coerce datetime.date / datetime.datetime / pandas.Timestamp -> date."""
     if d is None:
