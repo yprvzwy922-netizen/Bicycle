@@ -194,8 +194,44 @@ if chain.empty:
     st.warning("NO STRIKES IN THIS DELTA BAND. TRY 'ALL'.")
     st.stop()
 
+# ── Optimal-strike scoring ────────────────────────────────────────────────────
+# Score 0-100 balancing YIELD, CUSHION (safety), DELTA proximity to the band
+# target, and LIQUIDITY. Income favours safety; Wheel tolerates more delta for
+# premium because assignment at a good entry is acceptable.
+if "INCOME" in band_label:
+    target_delta = 0.225          # midpoint of 0.15-0.30
+    W = {"yield":0.25, "cushion":0.35, "delta":0.25, "liq":0.15}
+elif "WHEEL" in band_label:
+    target_delta = 0.375          # midpoint of 0.30-0.45
+    W = {"yield":0.40, "cushion":0.25, "delta":0.20, "liq":0.15}
+else:  # ALL — default to income-style safety
+    target_delta = 0.25
+    W = {"yield":0.30, "cushion":0.30, "delta":0.25, "liq":0.15}
+
+def _minmax(s):
+    s = s.astype(float)
+    rng = s.max() - s.min()
+    if rng == 0 or np.isnan(rng):
+        return pd.Series(1.0, index=s.index)   # all equal → neutral full marks
+    return (s - s.min()) / rng
+
+# Component scores (higher = better)
+sc_yield   = _minmax(chain["ann_yield"])
+sc_cushion = _minmax(chain["cushion_pct"])
+sc_delta   = 1 - _minmax((chain["delta"] - target_delta).abs())   # closer to target = higher
+sc_liq     = 1 - _minmax(chain["spread_pct"].fillna(chain["spread_pct"].max()))  # tighter spread = higher
+
+chain["score"] = (
+    W["yield"]   * sc_yield   +
+    W["cushion"] * sc_cushion +
+    W["delta"]   * sc_delta   +
+    W["liq"]     * sc_liq
+) * 100
+chain["score"] = chain["score"].round(1)
+
 # ── Display ───────────────────────────────────────────────────────────────────
 COLS = {
+    "score":           "SCORE",
     "strike":          "STRIKE",
     "moneyness":       "MONEYNESS",
     "impliedVolatility":"IV",
@@ -212,6 +248,9 @@ COLS = {
     "spread_pct":      "SPREAD %",
     "illiquid":        "ILLIQUID",
 }
+# Sort best-scored strikes to the top
+chain = chain.sort_values("score", ascending=False)
+
 present = [c for c in COLS if c in chain.columns]
 disp = chain[present].rename(columns=COLS).copy()
 
@@ -219,11 +258,18 @@ def cm(v):
     return {"OTM":"background-color:#0a1a0a","ATM":"background-color:#1a1400",
             "ITM":"background-color:#1a0a0a"}.get(v,"")
 def ci(v): return "color:#ff9900;font-weight:600" if v else ""
+def cs(v):
+    try:
+        f = float(v)
+        return "color:#00e676;font-weight:700" if f >= 75 else "color:#00c8ff;font-weight:600" if f >= 50 else "color:#888888"
+    except: return ""
 
 styled = (disp.style
     .map(cm, subset=["MONEYNESS"])
     .map(ci, subset=["ILLIQUID"])
+    .map(cs, subset=["SCORE"])
     .format({
+        "SCORE":            "{:.1f}",
         "STRIKE":           "${:.2f}",
         "IV":               "{:.1%}",
         "DELTA":            "{:.3f}",
@@ -239,15 +285,23 @@ styled = (disp.style
 
 st.dataframe(styled, use_container_width=True, hide_index=True)
 
-# ── Best strike highlight ─────────────────────────────────────────────────────
-best = chain.sort_values("ann_yield", ascending=False).iloc[0]
+# ── Optimal strike highlight (top score) ──────────────────────────────────────
+best = chain.sort_values("score", ascending=False).iloc[0]
+band_name = "INCOME" if "INCOME" in band_label else "WHEEL" if "WHEEL" in band_label else "BALANCED"
 st.success(
-    f"BEST YIELD IN BAND:  "
+    f"OPTIMAL {band_name} STRIKE (SCORE {best['score']:.0f}/100):  "
     f"STRIKE ${best['strike']:.2f}  |  "
     f"DELTA {best['delta']:.3f}  |  "
     f"ANN YIELD {best['ann_yield']:.1%}  |  "
     f"CUSHION {best['cushion_pct']:.1%}  |  "
     f"BREAKEVEN ${best['breakeven']:.2f}"
+)
+st.caption(
+    f"SCORE = balance of yield, cushion, delta-fit, and liquidity.  "
+    f"{band_name} weights → "
+    f"YIELD {W['yield']:.0%} · CUSHION {W['cushion']:.0%} · "
+    f"DELTA-FIT {W['delta']:.0%} (target {target_delta:.2f}) · LIQUIDITY {W['liq']:.0%}.  "
+    f"Highest raw yield is usually the riskiest strike — score rewards the best risk-adjusted strike instead."
 )
 
 if chain["illiquid"].any():
