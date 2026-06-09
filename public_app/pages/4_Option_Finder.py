@@ -97,8 +97,8 @@ with c3:
     opt_type = st.selectbox("OPTION TYPE", ["PUTS","CALLS"])
 with c4:
     band_label = st.selectbox("DELTA BAND", ["INCOME 0.15-0.30","WHEEL 0.30-0.45","ALL"])
-    lo = {"INCOME 0.15-0.30":0.05,"WHEEL 0.30-0.45":0.20}.get(band_label, 0.0)
-    hi = {"INCOME 0.15-0.30":0.45,"WHEEL 0.30-0.45":0.65}.get(band_label, 1.0)
+    lo = {"INCOME 0.15-0.30":0.15,"WHEEL 0.30-0.45":0.30}.get(band_label, 0.0)
+    hi = {"INCOME 0.15-0.30":0.30,"WHEEL 0.30-0.45":0.45}.get(band_label, 1.0)
 with c5:
     st.markdown(" ")
     st.markdown(" ")
