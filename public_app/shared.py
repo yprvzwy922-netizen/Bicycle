@@ -235,21 +235,60 @@ def trend_label_score(hist):
     if p < e50 < e200: return "DOWN", 1.0
     return "NEUTRAL", 2.5
 
+def score_strikes(sub, target_delta, weights):
+    """Add a 0-100 'score' column balancing yield, cushion, delta-fit, liquidity.
+    Same logic the Option Finder uses. `sub` needs columns:
+    ann_yield, cushion_pct, delta, spread_pct."""
+    def _minmax(s):
+        s = s.astype(float)
+        rng = s.max() - s.min()
+        if rng == 0 or np.isnan(rng):
+            return pd.Series(1.0, index=s.index)
+        return (s - s.min()) / rng
+    sc_yield   = _minmax(sub["ann_yield"])
+    sc_cushion = _minmax(sub["cushion_pct"])
+    sc_delta   = 1 - _minmax((sub["delta"] - target_delta).abs())
+    sc_liq     = 1 - _minmax(sub["spread_pct"].fillna(sub["spread_pct"].max()))
+    return (weights["yield"]   * sc_yield   +
+            weights["cushion"] * sc_cushion +
+            weights["delta"]   * sc_delta   +
+            weights["liq"]     * sc_liq) * 100
+
 def best_put(tkr, delta_band, target_dte):
-    lo, hi = (0.15, 0.30) if delta_band == "Income" else (0.30, 0.45)
-    target = (lo + hi) / 2
+    # Band bounds + scoring weights match the Option Finder
+    if delta_band == "Income":
+        lo, hi, target = 0.15, 0.30, 0.225
+        weights = {"yield":0.25, "cushion":0.35, "delta":0.25, "liq":0.15}
+    else:  # Wheel
+        lo, hi, target = 0.30, 0.45, 0.375
+        weights = {"yield":0.40, "cushion":0.25, "delta":0.20, "liq":0.15}
+
     spot = fetch_spot(tkr)
     chain, expiry, dte = fetch_chain(tkr, target_dte, "put")
     if chain is None or chain.empty: return {}
     chain = chain[chain["impliedVolatility"] > 0].copy()
     chain["delta"] = chain.apply(
         lambda r: bs_put_delta(spot, r["strike"], r["impliedVolatility"], dte), axis=1)
-    sub = chain[(chain["delta"] >= lo*0.5) & (chain["delta"] <= hi*1.8)]
-    if sub.empty: sub = chain
-    sub = sub.copy()
-    sub["dist"] = (sub["delta"] - target).abs()
-    row = sub.loc[sub["dist"].idxmin()]
-    prem = float(row["mid"]) if not np.isnan(row["mid"]) else float(row["bid"])
+
+    # Restrict to the band; fall back to a wider window only if empty
+    sub = chain[(chain["delta"] >= lo) & (chain["delta"] <= hi)].copy()
+    if sub.empty:
+        sub = chain[(chain["delta"] >= lo*0.5) & (chain["delta"] <= hi*1.8)].copy()
+    if sub.empty:
+        sub = chain.copy()
+
+    # Enrich for scoring
+    sub["mid"]         = sub["mid"].fillna(sub["bid"])
+    sub["ann_yield"]   = sub.apply(lambda r: ann_yield(r["mid"], r["strike"], dte), axis=1)
+    sub["cushion_pct"] = (spot - sub["strike"]) / spot if spot else np.nan
+    if "spread_pct" not in sub.columns:
+        sub["spread_pct"] = (sub["ask"] - sub["bid"]) / sub["mid"].replace(0, np.nan)
+
+    # Highest-scoring strike in the band
+    sub["score"] = score_strikes(sub, target, weights)
+    row = sub.loc[sub["score"].idxmax()]
+
+    prem   = float(row["mid"]) if not np.isnan(row["mid"]) else float(row["bid"])
     strike = float(row["strike"])
     sp = float((row["ask"]-row["bid"])/row["mid"]) if row["mid"] > 0 else float("nan")
     return {"expiry": expiry, "dte": dte, "strike": strike,
@@ -260,7 +299,8 @@ def best_put(tkr, delta_band, target_dte):
             "cushion": round((spot-strike)/spot if spot else float("nan"), 4),
             "breakeven": round(strike - prem, 2),
             "oi": int(row.get("openInterest", 0) or 0),
-            "spread_pct": round(sp, 3)}
+            "spread_pct": round(sp, 3),
+            "score": round(float(row["score"]), 1)}
 
 def best_call(tkr, target_delta, target_dte):
     """Best covered call — OTM call closest to target_delta."""
