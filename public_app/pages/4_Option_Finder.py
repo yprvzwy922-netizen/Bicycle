@@ -92,7 +92,10 @@ with c2:
     dte_map = {"1M (~30 DTE)":30,"45 DAYS":45,"3M (MONTHLY)":90,"6M (MONTHLY)":180}
     # 3M / 6M snap to the standard 3rd-Friday monthly contract (deepest liquidity)
     monthly_only = tenor in ("3M (MONTHLY)","6M (MONTHLY)")
-    target_dte = dte_map.get(tenor, st.number_input("DTE", 7, 365, 35) if tenor=="CUSTOM" else 35)
+    if tenor == "CUSTOM":
+        target_dte = st.number_input("CUSTOM DTE", min_value=7, max_value=730, value=35, step=1)
+    else:
+        target_dte = dte_map[tenor]
 with c3:
     opt_type = st.selectbox("OPTION TYPE", ["PUTS","CALLS"])
 with c4:
@@ -186,9 +189,13 @@ chain["eff_entry"]    = chain.apply(
 chain["cash_1ct"]     = chain["strike"] * 100
 chain["illiquid"]     = chain["spread_pct"].fillna(1) > 0.10
 
-# Delta band filter
+# Drop any strikes whose delta could not be computed, then apply the band filter
+chain = chain[chain["delta"].notna()].copy()
 if band_label != "ALL":
     chain = chain[(chain["delta"] >= lo) & (chain["delta"] <= hi)]
+else:
+    st.caption("BAND = ALL → showing every strike (deltas from ~0.01 deep-OTM to ~0.99 deep-ITM). "
+               "Pick INCOME or WHEEL to restrict the delta range.")
 
 if chain.empty:
     st.warning("NO STRIKES IN THIS DELTA BAND. TRY 'ALL'.")
