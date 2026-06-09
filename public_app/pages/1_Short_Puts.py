@@ -144,7 +144,8 @@ k4.metric("AVG 1M ANN YIELD", f"{avg_yld:.1%}" if not np.isnan(avg_yld) else "�
 st.markdown("---")
 
 # ── Table ─────────────────────────────────────────────────────────────────────
-SHOW = ["TICKER","COMPANY","SECTOR","PRICE","TREND","IV RANK","EARN DAYS","BAND",
+# COMPANY and SECTOR are kept in df for filtering but hidden from the table
+SHOW = ["TICKER","PRICE","TREND","IV RANK","EARN DAYS","BAND",
         "1M STRIKE","1M DELTA","1M IV","1M ANN YLD","1M CUSHION","1M PREMIUM","1M EXPIRY",
         "3M STRIKE","3M DELTA","3M ANN YLD","3M CUSHION","3M PREMIUM",
         "SCORE","VERDICT"]
@@ -198,7 +199,9 @@ if not warn.empty:
     st.warning(f"EARNINGS WARNING: {names} — do not sell puts through earnings without a plan.")
 
 st.markdown("---")
-st.caption("STRIKE = BS DELTA CLOSEST TO BAND CENTRE (INCOME 0.225 / WHEEL 0.375) | "
+st.caption("STRIKE = BS DELTA CLOSEST TO BAND CENTRE (INCOME 0.225 / WHEEL 0.375), NEAREST EXPIRY TO 35 DTE (1M) / 90 DTE (3M) | "
+           "EARN DAYS = CALENDAR DAYS TO NEXT EARNINGS (RED = INSIDE 35D WINDOW) | "
            "IV RANK = 1Y REALIZED VOL PERCENTILE (PROXY) | "
+           "SCORE + VERDICT ARE COMPUTED ON THE 1M (35 DTE) TRADE | "
            "SCORE THRESHOLD: TRADE >= 3.8 | WATCH >= 3.0 | "
            "ALWAYS RECONCILE WITH BROKER BEFORE TRADING")

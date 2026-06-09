@@ -120,34 +120,68 @@ def fetch_hist(tkr):
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def _as_date(d):
+    """Coerce datetime.date / datetime.datetime / pandas.Timestamp -> date."""
+    if d is None:
+        return None
+    if hasattr(d, "date") and not isinstance(d, datetime.date):
+        return d.date()                 # datetime / Timestamp
+    if isinstance(d, datetime.date):
+        return d                        # already a date
+    try:
+        return pd.Timestamp(d).date()   # strings, numpy datetimes, etc.
+    except Exception:
+        return None
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_earnings(tkr):
+    """Days until the next earnings date (>=0), or None if unavailable."""
+    today = datetime.date.today()
+    candidates = []
     try:
         t = yf.Ticker(tkr)
-        # Try calendar
-        cal = t.calendar
-        if cal is not None:
+
+        # 1) calendar (dict in modern yfinance, sometimes a DataFrame)
+        try:
+            cal = t.calendar
             if isinstance(cal, dict):
-                dates = cal.get("Earnings Date", [])
-                if dates:
-                    d = dates[0]
-                    if hasattr(d, "date"):
-                        return max((d.date() - datetime.date.today()).days, 0)
-            elif hasattr(cal, "columns"):
+                for d in cal.get("Earnings Date", []) or []:
+                    dd = _as_date(d)
+                    if dd: candidates.append(dd)
+            elif cal is not None and hasattr(cal, "columns"):
                 for col in cal.columns:
-                    if hasattr(col, "date") and col.date() >= datetime.date.today():
-                        return (col.date() - datetime.date.today()).days
-        # Try earnings_dates
-        ed = t.earnings_dates
-        if ed is not None and not ed.empty:
-            idx = ed.index
-            if hasattr(idx, "tz") and idx.tz is not None:
-                idx = idx.tz_localize(None)
-            future_mask = idx > pd.Timestamp.now()
-            if future_mask.any():
-                next_ts = idx[future_mask][0]
-                return max((next_ts.date() - datetime.date.today()).days, 0)
+                    dd = _as_date(col)
+                    if dd: candidates.append(dd)
+        except Exception:
+            pass
+
+        # 2) earnings_dates table (covers past + future)
+        try:
+            ed = t.earnings_dates
+            if ed is not None and not ed.empty:
+                for ts in ed.index:
+                    dd = _as_date(ts)
+                    if dd: candidates.append(dd)
+        except Exception:
+            pass
+
+        # 3) get_earnings_dates fallback
+        if not candidates:
+            try:
+                ed2 = t.get_earnings_dates(limit=8)
+                if ed2 is not None and not ed2.empty:
+                    for ts in ed2.index:
+                        dd = _as_date(ts)
+                        if dd: candidates.append(dd)
+            except Exception:
+                pass
     except Exception:
-        pass
+        return None
+
+    # Nearest future date (today counts as 0)
+    future = sorted(d for d in candidates if d >= today)
+    if future:
+        return (future[0] - today).days
     return None
 
 @st.cache_data(ttl=300, show_spinner=False)
