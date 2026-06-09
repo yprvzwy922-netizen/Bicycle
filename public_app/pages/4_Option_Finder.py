@@ -231,7 +231,6 @@ chain["score"] = chain["score"].round(1)
 
 # ── Display ───────────────────────────────────────────────────────────────────
 COLS = {
-    "score":           "SCORE",
     "strike":          "STRIKE",
     "moneyness":       "MONEYNESS",
     "impliedVolatility":"IV",
@@ -247,9 +246,10 @@ COLS = {
     "volume":          "VOLUME",
     "spread_pct":      "SPREAD %",
     "illiquid":        "ILLIQUID",
+    "score":           "SCORE",
 }
-# Sort best-scored strikes to the top
-chain = chain.sort_values("score", ascending=False)
+# Keep the table sorted by strike (score lives in its own column on the right)
+chain = chain.sort_values("strike")
 
 present = [c for c in COLS if c in chain.columns]
 disp = chain[present].rename(columns=COLS).copy()
