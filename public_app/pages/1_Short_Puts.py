@@ -9,7 +9,8 @@ import pandas as pd
 import streamlit as st
 import bbg_style
 from shared import (get_watchlist, fetch_spot, fetch_hist, fetch_earnings,
-                    best_put, trend_label_score, rv_percentile, score_put, SECTORS)
+                    best_put, trend_label_score, rv_percentile, score_put,
+                    prefetch, SECTORS)
 
 st.set_page_config(page_title="Short Puts", layout="wide")
 bbg_style.inject()
@@ -53,7 +54,11 @@ with col_btn:
 # ── Build rows ────────────────────────────────────────────────────────────────
 wl = get_watchlist()
 rows, errors = [], []
-prog = st.progress(0, text="LOADING...")
+
+# Warm all per-ticker caches in parallel first (network-bound) so the loop below
+# reads from cache instead of blocking on sequential yfinance calls.
+prog = st.progress(0, text="FETCHING MARKET DATA...")
+prefetch([w["ticker"] for w in wl], dtes=(35,), option_type="put")
 
 for i, w in enumerate(wl):
     tkr = w["ticker"]

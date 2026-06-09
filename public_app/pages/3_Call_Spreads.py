@@ -9,7 +9,8 @@ import pandas as pd
 import streamlit as st
 import bbg_style
 from shared import (get_watchlist, fetch_spot, fetch_hist, fetch_earnings,
-                    best_bear_call_spread, trend_label_score, rv_percentile, SECTORS)
+                    best_bear_call_spread, trend_label_score, rv_percentile,
+                    prefetch, SECTORS)
 
 st.set_page_config(page_title="Call Spreads", layout="wide")
 bbg_style.inject()
@@ -55,7 +56,8 @@ with st.sidebar:
 # ── Build rows ────────────────────────────────────────────────────────────────
 wl = get_watchlist()
 rows, errors = [], []
-prog = st.progress(0, text="LOADING...")
+prog = st.progress(0, text="FETCHING MARKET DATA...")
+prefetch([w["ticker"] for w in wl], dtes=(target_dte,), option_type="call")
 
 for i, w in enumerate(wl):
     tkr = w["ticker"]

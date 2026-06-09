@@ -5,6 +5,7 @@ No DB dependency — pure yfinance + session_state watchlist.
 """
 import datetime
 import sys, os
+from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.dirname(__file__))
 
 import numpy as np
@@ -59,17 +60,25 @@ def remove_from_watchlist(ticker):
         st.session_state["watchlist"].pop(ticker.upper(), None)
 
 # ── Math ──────────────────────────────────────────────────────────────────────
-def bs_put_delta(spot, strike, iv, dte, rf=0.053):
-    if dte <= 0 or iv <= 0 or spot <= 0 or strike <= 0: return float("nan")
+def _bs_delta(spot, strike, iv, dte, rf, kind):
+    """Vectorized Black-Scholes delta. `strike`/`iv` may be scalars or arrays.
+    Returns a float for scalar input, a numpy array otherwise."""
+    strike = np.asarray(strike, dtype=float)
+    iv     = np.asarray(iv, dtype=float)
+    scalar = strike.ndim == 0 and iv.ndim == 0
     T = dte / 365.0
-    d1 = (np.log(spot/strike) + (rf + 0.5*iv**2)*T) / (iv*np.sqrt(T))
-    return abs(norm.cdf(d1) - 1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        d1  = (np.log(spot/strike) + (rf + 0.5*iv**2)*T) / (iv*np.sqrt(T))
+        out = np.abs(norm.cdf(d1) - 1) if kind == "put" else norm.cdf(d1)
+    invalid = (dte <= 0) | (iv <= 0) | (spot <= 0) | (strike <= 0)
+    out = np.where(invalid, np.nan, out)
+    return float(out) if scalar else out
+
+def bs_put_delta(spot, strike, iv, dte, rf=0.053):
+    return _bs_delta(spot, strike, iv, dte, rf, "put")
 
 def bs_call_delta(spot, strike, iv, dte, rf=0.053):
-    if dte <= 0 or iv <= 0 or spot <= 0 or strike <= 0: return float("nan")
-    T = dte / 365.0
-    d1 = (np.log(spot/strike) + (rf + 0.5*iv**2)*T) / (iv*np.sqrt(T))
-    return norm.cdf(d1)
+    return _bs_delta(spot, strike, iv, dte, rf, "call")
 
 def moneyness(spot, strike, is_put=True):
     b = 0.01 * spot
@@ -224,6 +233,25 @@ def fetch_chain(tkr, target_dte, option_type="put", monthly_only=False):
     except Exception:
         return None, None, None
 
+def prefetch(tickers, dtes=(35,), option_type="put"):
+    """Warm the per-ticker caches concurrently so the screener's main loop
+    hits warm caches instead of blocking on sequential network I/O.
+    st.cache_data is process-wide and thread-safe, so threads populate the
+    same cache the main thread reads."""
+    def warm(tkr):
+        try:
+            fetch_spot(tkr)
+            fetch_hist(tkr)
+            fetch_earnings(tkr)
+            for d in dtes:
+                fetch_chain(tkr, d, option_type)
+        except Exception:
+            pass
+    if not tickers:
+        return
+    with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as ex:
+        list(ex.map(warm, tickers))
+
 def trend_label_score(hist):
     if hist.empty or len(hist) < 20: return "N/A", 2.5
     c = hist["Close"]
@@ -267,8 +295,8 @@ def best_put(tkr, delta_band, target_dte):
     chain, expiry, dte = fetch_chain(tkr, target_dte, "put")
     if chain is None or chain.empty: return {}
     chain = chain[chain["impliedVolatility"] > 0].copy()
-    chain["delta"] = chain.apply(
-        lambda r: bs_put_delta(spot, r["strike"], r["impliedVolatility"], dte), axis=1)
+    chain["delta"] = bs_put_delta(spot, chain["strike"].values,
+                                  chain["impliedVolatility"].values, dte)
 
     # Restrict to the band; fall back to a wider window only if empty
     sub = chain[(chain["delta"] >= lo) & (chain["delta"] <= hi)].copy()
@@ -277,9 +305,9 @@ def best_put(tkr, delta_band, target_dte):
     if sub.empty:
         sub = chain.copy()
 
-    # Enrich for scoring
+    # Enrich for scoring (vectorized)
     sub["mid"]         = sub["mid"].fillna(sub["bid"])
-    sub["ann_yield"]   = sub.apply(lambda r: ann_yield(r["mid"], r["strike"], dte), axis=1)
+    sub["ann_yield"]   = (sub["mid"] / sub["strike"]) * (365.0 / dte)
     sub["cushion_pct"] = (spot - sub["strike"]) / spot if spot else np.nan
     if "spread_pct" not in sub.columns:
         sub["spread_pct"] = (sub["ask"] - sub["bid"]) / sub["mid"].replace(0, np.nan)
@@ -312,8 +340,8 @@ def best_call(tkr, target_delta, target_dte):
     otm = chain[chain["strike"] > spot * 0.99]
     if otm.empty: otm = chain
     otm = otm.copy()
-    otm["delta"] = otm.apply(
-        lambda r: bs_call_delta(spot, r["strike"], r["impliedVolatility"], dte), axis=1)
+    otm["delta"] = bs_call_delta(spot, otm["strike"].values,
+                                 otm["impliedVolatility"].values, dte)
     otm["dist"] = (otm["delta"] - target_delta).abs()
     row = otm.loc[otm["dist"].idxmin()]
     prem = float(row["mid"]) if not np.isnan(row["mid"]) else float(row["bid"])
@@ -340,8 +368,8 @@ def best_bear_call_spread(tkr, short_delta, spread_width_pct, target_dte):
     chain = chain[chain["impliedVolatility"] > 0].copy()
     otm = chain[chain["strike"] > spot * 0.99].copy()
     if otm.empty: return {}
-    otm["delta"] = otm.apply(
-        lambda r: bs_call_delta(spot, r["strike"], r["impliedVolatility"], dte), axis=1)
+    otm["delta"] = bs_call_delta(spot, otm["strike"].values,
+                                 otm["impliedVolatility"].values, dte)
     otm["dist"] = (otm["delta"] - short_delta).abs()
     short_row = otm.loc[otm["dist"].idxmin()]
     short_strike = float(short_row["strike"])

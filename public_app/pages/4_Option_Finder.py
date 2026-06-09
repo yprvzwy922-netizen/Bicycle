@@ -169,23 +169,31 @@ if chain is None or chain.empty:
 st.markdown(f"### {ticker}  |  SPOT: ${spot:.2f}  |  EXPIRY: {expiry}  |  DTE: {dte}")
 st.markdown("---")
 
-# ── Enrich ────────────────────────────────────────────────────────────────────
+# ── Enrich (vectorized) ───────────────────────────────────────────────────────
 chain = chain[chain["impliedVolatility"] > 0].copy()
+is_put = opt == "put"
+strike_v = chain["strike"].values
+mid_v    = chain["mid"].values
 
-if opt == "put":
-    chain["delta"]   = chain.apply(
-        lambda r: bs_put_delta(spot, r["strike"], r["impliedVolatility"], dte), axis=1)
+delta_fn = bs_put_delta if is_put else bs_call_delta
+chain["delta"]       = delta_fn(spot, strike_v, chain["impliedVolatility"].values, dte)
+
+# Moneyness via vectorized thresholds (1% band around spot)
+band = 0.01 * spot
+if is_put:
+    chain["moneyness"] = np.where(strike_v < spot - band, "OTM",
+                          np.where(strike_v > spot + band, "ITM", "ATM"))
+    chain["cushion_pct"] = (spot - strike_v) / spot
+    chain["breakeven"]   = chain["strike"] - chain["mid"]
+    chain["eff_entry"]   = (strike_v - mid_v) / spot - 1
 else:
-    chain["delta"]   = chain.apply(
-        lambda r: bs_call_delta(spot, r["strike"], r["impliedVolatility"], dte), axis=1)
+    chain["moneyness"] = np.where(strike_v > spot + band, "OTM",
+                          np.where(strike_v < spot - band, "ITM", "ATM"))
+    chain["cushion_pct"] = (strike_v - spot) / spot
+    chain["breakeven"]   = chain["strike"] + chain["mid"]
+    chain["eff_entry"]   = (strike_v + mid_v) / spot - 1
 
-chain["moneyness"]    = chain["strike"].apply(lambda k: moneyness(spot, k, opt=="put"))
-chain["ann_yield"]    = chain.apply(lambda r: ann_yield(r["mid"], r["strike"], dte), axis=1)
-chain["cushion_pct"]  = chain["strike"].apply(
-    lambda k: (spot-k)/spot if opt=="put" else (k-spot)/spot)
-chain["breakeven"]    = chain["strike"] - chain["mid"] if opt == "put" else chain["strike"] + chain["mid"]
-chain["eff_entry"]    = chain.apply(
-    lambda r: (r["strike"]-r["mid"])/spot - 1 if opt=="put" else (r["strike"]+r["mid"])/spot - 1, axis=1)
+chain["ann_yield"]    = (mid_v / strike_v) * (365.0 / dte)
 chain["cash_1ct"]     = chain["strike"] * 100
 chain["illiquid"]     = chain["spread_pct"].fillna(1) > 0.10
 
