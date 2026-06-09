@@ -99,9 +99,9 @@ with c2:
 with c3:
     opt_type = st.selectbox("OPTION TYPE", ["PUTS","CALLS"])
 with c4:
-    band_label = st.selectbox("DELTA BAND", ["INCOME 0.15-0.30","WHEEL 0.30-0.45","ALL"])
-    lo = {"INCOME 0.15-0.30":0.15,"WHEEL 0.30-0.45":0.30}.get(band_label, 0.0)
-    hi = {"INCOME 0.15-0.30":0.30,"WHEEL 0.30-0.45":0.45}.get(band_label, 1.0)
+    band_label = st.selectbox("DELTA BAND", ["INCOME 0.15-0.30","WHEEL 0.30-0.45","ALL (0.10-0.70)"])
+    lo = {"INCOME 0.15-0.30":0.15,"WHEEL 0.30-0.45":0.30}.get(band_label, 0.10)
+    hi = {"INCOME 0.15-0.30":0.30,"WHEEL 0.30-0.45":0.45}.get(band_label, 0.70)
 with c5:
     st.markdown(" ")
     st.markdown(" ")
@@ -197,16 +197,17 @@ chain["ann_yield"]    = (mid_v / strike_v) * (365.0 / dte)
 chain["cash_1ct"]     = chain["strike"] * 100
 chain["illiquid"]     = chain["spread_pct"].fillna(1) > 0.10
 
-# Drop any strikes whose delta could not be computed, then apply the band filter
+# Drop any strikes whose delta could not be computed, then apply the band filter.
+# Every band (including ALL) is bounded — ALL just uses a wide 0.10-0.70 window
+# so deep-OTM/ITM noise is trimmed.
 chain = chain[chain["delta"].notna()].copy()
-if band_label != "ALL":
-    chain = chain[(chain["delta"] >= lo) & (chain["delta"] <= hi)]
-else:
-    st.caption("BAND = ALL → showing every strike (deltas from ~0.01 deep-OTM to ~0.99 deep-ITM). "
-               "Pick INCOME or WHEEL to restrict the delta range.")
+chain = chain[(chain["delta"] >= lo) & (chain["delta"] <= hi)]
+if "ALL" in band_label:
+    st.caption("BAND = ALL → wide 0.10-0.70 delta window (deep-OTM and deep-ITM strikes trimmed). "
+               "Pick INCOME or WHEEL to narrow further.")
 
 if chain.empty:
-    st.warning("NO STRIKES IN THIS DELTA BAND. TRY 'ALL'.")
+    st.warning("NO STRIKES IN THIS DELTA BAND. TRY A DIFFERENT TENOR OR TICKER.")
     st.stop()
 
 # ── Optimal-strike scoring ────────────────────────────────────────────────────
