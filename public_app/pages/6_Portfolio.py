@@ -31,16 +31,16 @@ st.caption("OPEN POSITIONS FROM TRADE LOG | DELTA EXPOSURE | SECTOR LIMITS | RIS
 # ── Risk limits (sidebar) ─────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### RISK LIMITS")
-    TOTAL_CAPITAL   = st.number_input("TOTAL CAPITAL ($)", 10_000, 10_000_000, 100_000, 5_000)
-    MAX_SINGLE_NAME = st.slider("MAX SINGLE NAME %",      5,  30, 10) / 100
-    MAX_SPECULATIVE = st.slider("MAX SPECULATIVE %",     10,  50, 20) / 100
-    MAX_SECTOR      = st.slider("MAX SECTOR %",          10,  50, 25) / 100
-    MAX_DEPLOYED    = st.slider("MAX % DEPLOYED",        50, 100, 95) / 100   # 95% default — fully-invested strategy
-    MIN_CASH_BUFFER = st.slider("MIN CASH BUFFER %",      0,  40,  5) / 100
-    MAX_DELTA_TOTAL = st.number_input("MAX NET DELTA ($ notional)", 0, 10_000_000, 50_000, 5_000,
+    st.caption("DEFAULTS = PUT-SELLING PROSPECT CAPS (OPS STEP 6)")
+    TOTAL_CAPITAL   = st.number_input("TOTAL CAPITAL ($)", 10_000, 10_000_000, 1_000_000, 5_000)
+    MAX_SINGLE_NAME = st.slider("MAX SINGLE NAME %",      5,  30, 10) / 100   # <=10% per name
+    MAX_PER_TRADE   = st.slider("MAX SINGLE TRADE %",     1,  10,  3) / 100   # <=2-3% per trade
+    MAX_SPECULATIVE = st.slider("MAX SPECULATIVE %",     10,  50, 40) / 100   # <=40% spec bucket
+    MAX_SECTOR      = st.slider("MAX SECTOR %",          10,  50, 30) / 100   # <=30% per sector
+    MAX_DEPLOYED    = st.slider("MAX % DEPLOYED",        50, 100, 100) / 100  # 100% invested mandate
+    MIN_CASH_BUFFER = st.slider("MIN CASH BUFFER %",      0,  40,  0) / 100   # no idle cash
+    MAX_DELTA_TOTAL = st.number_input("MAX NET DELTA ($ notional)", 0, 10_000_000, 500_000, 5_000,
                                       help="Max total dollar-delta across all positions")
-    st.markdown("---")
-    st.caption("LIMITS MATCH PUT-SELLING PLAYBOOK DEFAULTS")
     st.markdown("---")
     st.markdown("### DELTA EXPLAINED")
     st.caption(
@@ -145,6 +145,37 @@ for _, t in open_trades.iterrows():
     else:
         unreal = float("nan")
 
+    # ── Profit-take tracker (manual §5.1) ─────────────────────────────────────
+    # % of max profit captured = (premium - current mid) / premium for shorts.
+    # Manage-by: 1M trades at 21 DTE, 3M trades at 45 DTE (tenor from DTE OPEN).
+    dte_open = int(t["DTE OPEN"]) if pd.notna(t.get("DTE OPEN")) else 35
+    tenor    = "3M" if dte_open > 60 else "1M"
+    manage_at = 45 if tenor == "3M" else 21
+
+    pct_max_profit = float("nan")
+    if is_short and prem > 0 and not np.isnan(curr_mid):
+        pct_max_profit = (prem - curr_mid) / prem
+
+    # Annualized yield of the premium still on the table (manual: close if < ~15%)
+    yield_left = float("nan")
+    if is_short and short_strike > 0 and dte_rem > 0 and not np.isnan(curr_mid):
+        yield_left = (curr_mid / short_strike) * (365.0 / dte_rem)
+
+    # Action flag per the manual's procedure
+    if not np.isnan(pct_max_profit) and pct_max_profit >= 0.90:
+        action = "CLOSE (90%+)"
+    elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.50 and \
+         not np.isnan(yield_left) and yield_left < 0.15:
+        action = "CLOSE (YIELD LEFT < 15%)"
+    elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.75:
+        action = "TAKE 75% TIER"
+    elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.50:
+        action = "TAKE 50% TIER"
+    elif dte_rem <= manage_at:
+        action = f"MANAGE ({tenor} @ {manage_at} DTE)"
+    else:
+        action = ""
+
     # ── Cash at risk / max loss (strategy-aware) ───────────────────────────────
     # Use the Trade Log's stored values when present, otherwise derive correctly
     # per strategy — NEVER fall back to strike*100 for spreads/covered calls,
@@ -184,6 +215,7 @@ for _, t in open_trades.iterrows():
         "SPOT":          round(spot, 2)          if not np.isnan(spot)        else None,
         "SHORT STRIKE":  short_strike            if short_strike > 0          else None,
         "EXPIRY":        t["EXPIRY"],
+        "TENOR":         tenor,
         "DTE LEFT":      dte_rem,
         "CONTRACTS":     ctrs,
         "PREM RECEIVED": prem,
@@ -192,6 +224,9 @@ for _, t in open_trades.iterrows():
         "DELTA":         round(delta, 3)          if not np.isnan(delta)      else None,
         "$ DELTA":       round(dollar_delta, 0)   if not np.isnan(dollar_delta) else None,
         "UNREAL PNL":    round(unreal, 2)          if not np.isnan(unreal)    else None,
+        "% MAX PROFIT":  round(pct_max_profit, 4)  if not np.isnan(pct_max_profit) else None,
+        "YIELD LEFT":    round(yield_left, 4)      if not np.isnan(yield_left) else None,
+        "ACTION":        action,
         "CASH AT RISK":  cash_sec,
         "MAX LOSS":      max_loss,
     })
@@ -237,6 +272,22 @@ def color_delta(v):
         return "color:#00e676" if f > 0 else "color:#ff4444" if f < 0 else ""
     except: return ""
 
+def color_pct_profit(v):
+    try:
+        f = float(v)
+        if f >= 0.50: return "color:#00e676;font-weight:700"   # at/past the GTC level
+        if f >= 0.25: return "color:#00c8ff"
+        if f < 0:     return "color:#ff4444"
+        return ""
+    except: return ""
+
+def color_action(v):
+    s = str(v)
+    if s.startswith("CLOSE"):  return "color:#00e676;font-weight:700"
+    if s.startswith("TAKE"):   return "color:#00c8ff;font-weight:600"
+    if s.startswith("MANAGE"): return "color:#ff9900;font-weight:600"
+    return ""
+
 fmt = {
     "SPOT":          "${:.2f}",
     "SHORT STRIKE":  "${:.2f}",
@@ -248,15 +299,37 @@ fmt = {
     "CASH AT RISK":  "${:,.0f}",
     "MAX LOSS":      "${:,.0f}",
     "UNREAL PNL":    "${:,.0f}",
+    "% MAX PROFIT":  "{:.0%}",
+    "YIELD LEFT":    "{:.1%}",
 }
 styled_book = (book.style
-    .map(color_dte,   subset=["DTE LEFT"])
-    .map(color_pnl,   subset=["UNREAL PNL"])
-    .map(color_delta, subset=["DELTA"])
+    .map(color_dte,        subset=["DTE LEFT"])
+    .map(color_pnl,        subset=["UNREAL PNL"])
+    .map(color_delta,      subset=["DELTA"])
+    .map(color_pct_profit, subset=["% MAX PROFIT"])
+    .map(color_action,     subset=["ACTION"])
     .format(fmt, na_rep="—"))
 
 st.dataframe(styled_book, use_container_width=True, hide_index=True)
 st.caption("DELTA SIGN: +ve = bullish (short put / long call) | -ve = bearish (short call / long put)  |  IV from live option chain, fallback 35%")
+st.caption("PROFIT-TAKE PROCEDURE (MANUAL §5.1): GTC BUY-TO-CLOSE AT 50% ON ENTRY → CLOSE 1/2 AT 50%, 1/4 AT 75%, REST BY 90% OR MANAGE-BY DATE (1M @ 21 DTE, 3M @ 45 DTE). "
+           "YIELD LEFT = ANNUALIZED YIELD OF PREMIUM STILL ON THE TABLE — IF < 15% AFTER THE 50% TIER, CLOSE AND REDEPLOY.")
+
+# ── Tenor mix (manual: ~60-70% 1M / ~30-40% 3M) ──────────────────────────────
+st.markdown("### TENOR MIX")
+tm = book.groupby("TENOR")["CASH AT RISK"].sum()
+cash_1m, cash_3m = float(tm.get("1M", 0)), float(tm.get("3M", 0))
+tot_tm = cash_1m + cash_3m
+if tot_tm > 0:
+    pct_1m, pct_3m = cash_1m / tot_tm, cash_3m / tot_tm
+    in_band = 0.60 <= pct_1m <= 0.70
+    t1, t2, t3 = st.columns(3)
+    t1.metric("1M SLEEVE", f"{pct_1m:.0%}", f"${cash_1m:,.0f}")
+    t2.metric("3M SLEEVE", f"{pct_3m:.0%}", f"${cash_3m:,.0f}")
+    t3.metric("TARGET", "60-70% / 30-40%", "IN BAND" if in_band else "OUT OF BAND")
+    if not in_band:
+        st.warning(f"TENOR MIX OUT OF BAND: 1M = {pct_1m:.0%} (target 60-70%). "
+                   f"{'Shift new tranches to 3M.' if pct_1m > 0.70 else 'Shift new tranches to 1M.'}")
 
 st.markdown("---")
 
@@ -328,6 +401,14 @@ checks = [
      f"${abs(total_ddelta):,.0f}  vs  ${MAX_DELTA_TOTAL:,.0f} limit",
      abs(total_ddelta), MAX_DELTA_TOTAL),
 ]
+
+# Per-trade cap (manual: <=2-3% of capital per single trade)
+trade_breaches = book[book["CASH AT RISK"] > MAX_PER_TRADE * TOTAL_CAPITAL]
+checks.append(("PER-TRADE CAP", trade_breaches.empty,
+    "ALL OK" if trade_breaches.empty else
+    " | ".join(f"#{r['ID']} {r['TICKER']} ${r['CASH AT RISK']:,.0f} ({r['CASH AT RISK']/TOTAL_CAPITAL:.1%})"
+               for _, r in trade_breaches.iterrows()),
+    None, None))
 
 name_breaches   = delta_by_name[delta_by_name["OVER LIMIT"]]
 sector_breaches = by_sector[by_sector["OVER LIMIT"]]

@@ -58,7 +58,7 @@ rows, errors = [], []
 # Warm all per-ticker caches in parallel first (network-bound) so the loop below
 # reads from cache instead of blocking on sequential yfinance calls.
 prog = st.progress(0, text="FETCHING MARKET DATA...")
-prefetch([w["ticker"] for w in wl], dtes=(35,), option_type="put")
+prefetch([w["ticker"] for w in wl], dtes=(35, 90), option_type="put")
 
 for i, w in enumerate(wl):
     tkr = w["ticker"]
@@ -69,6 +69,7 @@ for i, w in enumerate(wl):
         trend, tech_s = trend_label_score(hist)
         ivr     = rv_percentile(hist)
         p1      = best_put(tkr, w["delta_band"], 35)
+        p3      = best_put(tkr, w["delta_band"], 90)   # 3M sleeve (30-40% of book per manual)
 
         ay   = p1.get("ann_yield", float("nan"))
         oi   = p1.get("oi", 0)
@@ -99,6 +100,12 @@ for i, w in enumerate(wl):
             "1M DTE":        p1.get("dte"),
             "1M OI":         p1.get("oi"),
             "1M SPREAD":     p1.get("spread_pct"),
+            "3M STRIKE":     p3.get("strike"),
+            "3M DELTA":      p3.get("delta"),
+            "3M ANN YLD":    p3.get("ann_yield"),
+            "3M CUSHION":    p3.get("cushion"),
+            "3M PREMIUM":    p3.get("premium"),
+            "3M EXPIRY":     p3.get("expiry"),
             "STRIKE SCORE":  p1.get("score"),
             "SCORE":         sc,
             "VERDICT":       vd,
@@ -147,9 +154,10 @@ st.markdown("---")
 
 # ── Table ─────────────────────────────────────────────────────────────────────
 # COMPANY and SECTOR are kept in df for filtering but hidden from the table.
-# 3M columns are hidden for now — short put strategy is run on the 1M (35 DTE) tenor.
+# 3M columns shown per manual: ~60-70% of capital in 1M, ~30-40% in 3M.
 SHOW = ["TICKER","PRICE","TREND","IV RANK","EARN DAYS","BAND",
         "1M STRIKE","1M DELTA","1M IV","1M ANN YLD","1M CUSHION","1M PREMIUM","1M OI","1M SPREAD","1M EXPIRY",
+        "3M STRIKE","3M DELTA","3M ANN YLD","3M CUSHION","3M PREMIUM","3M EXPIRY",
         "STRIKE SCORE","SCORE","VERDICT"]
 disp = df[[c for c in SHOW if c in df.columns]].copy()
 
@@ -183,12 +191,12 @@ styled = (disp.style
     .format({
         "PRICE":     "${:.2f}",
         "IV RANK":   "{:.0%}",
-        "1M STRIKE": "${:.2f}",
-        "1M DELTA":  "{:.3f}",
+        "1M STRIKE": "${:.2f}", "3M STRIKE": "${:.2f}",
+        "1M DELTA":  "{:.3f}",  "3M DELTA":  "{:.3f}",
         "1M IV":     "{:.1%}",
-        "1M ANN YLD":"{:.1%}",
-        "1M CUSHION":"{:.1%}",
-        "1M PREMIUM":"${:.2f}",
+        "1M ANN YLD":"{:.1%}",  "3M ANN YLD":"{:.1%}",
+        "1M CUSHION":"{:.1%}",  "3M CUSHION":"{:.1%}",
+        "1M PREMIUM":"${:.2f}", "3M PREMIUM":"${:.2f}",
         "1M SPREAD": "{:.1%}",
         "STRIKE SCORE":"{:.0f}",
         "SCORE":     "{:.2f}",
@@ -203,10 +211,11 @@ if not warn.empty:
     st.warning(f"EARNINGS WARNING: {names} — do not sell puts through earnings without a plan.")
 
 st.markdown("---")
-st.caption("1M STRIKE = HIGHEST-SCORING STRIKE IN THE BAND (SAME SCORE AS OPTION FINDER: YIELD + CUSHION + DELTA-FIT + LIQUIDITY), NEAREST EXPIRY TO 35 DTE | "
-           "STRIKE SCORE = 0-100 QUALITY OF THAT STRIKE | "
+st.caption("STRIKES = HIGHEST-SCORING IN BAND (YIELD + CUSHION + DELTA-FIT + LIQUIDITY), NEAREST EXPIRY TO 35 DTE (1M) / 90 DTE (3M) | "
+           "MANUAL TENOR MIX: ~60-70% CAPITAL IN 1M, ~30-40% IN 3M | "
+           "STRIKE SCORE = 0-100 QUALITY OF THE 1M STRIKE | "
            "EARN DAYS = CALENDAR DAYS TO NEXT EARNINGS (RED = INSIDE 35D WINDOW) | "
            "IV RANK = 1Y REALIZED VOL PERCENTILE (PROXY) | "
-           "SCORE + VERDICT (1-5) ARE THE TICKER-LEVEL COMPOSITE ON THE 1M TRADE | "
-           "VERDICT THRESHOLD: TRADE >= 3.8 | WATCH >= 3.0 | "
+           "SCORE + VERDICT (1-5) = TICKER-LEVEL COMPOSITE ON THE 1M TRADE | "
+           "VERDICT: TRADE >= 4.0 (MANUAL RULE) | WATCH >= 3.0 | "
            "ALWAYS RECONCILE WITH BROKER BEFORE TRADING")

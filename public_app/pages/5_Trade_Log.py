@@ -30,7 +30,7 @@ COLUMNS = [
     "ID","DATE OPENED","TICKER","STRATEGY",
     "SHORT STRIKE","LONG STRIKE","EXPIRY","DTE OPEN",
     "CONTRACTS","PREMIUM / CREDIT","CASH SECURED","MAX LOSS",
-    "STATUS","DATE CLOSED","CLOSE PRICE","REALIZED PNL","NOTES"
+    "STATUS","DATE CLOSED","CLOSE PRICE","REALIZED PNL","SIGNAL","NOTES"
 ]
 
 if "trades" not in st.session_state:
@@ -98,10 +98,20 @@ nt_long_strike  = sc2.number_input(
 )
 nt_expiry = sc3.date_input("EXPIRY DATE", datetime.date.today() + datetime.timedelta(days=35), key="nt_expiry")
 
-pc1, pc2 = st.columns(2)
+pc1, pc1b, pc2 = st.columns(3)
 nt_premium = pc1.number_input("PREMIUM / NET CREDIT (per share)", min_value=0.0, step=0.01, key="nt_premium",
                                help="For short options: credit received per share. For spreads: net credit = sell leg − buy leg.")
-nt_notes   = pc2.text_input("NOTES / SIGNAL", key="nt_notes")
+# Manual: log the Alpha Trend signal that triggered every trade (daily chart)
+nt_signal  = pc1b.selectbox("ALPHA TREND SIGNAL (DAILY)", [
+    "MACRO GREEN + STRENGTH",
+    "BULLISH TURQUOISE 'R' (CONFIRMED)",
+    "MACRO GREEN (PLAIN)",
+    "DOTS FLIPPED RED (DE-RISKED)",
+    "TOPPING 'T' / YELLOW 'R'",
+    "MACRO RED",
+    "OTHER / NOT SIGNAL-DRIVEN",
+], key="nt_signal")
+nt_notes   = pc2.text_input("NOTES", key="nt_notes")
 
 # Auto-calculations
 nt_dte = max((nt_expiry - datetime.date.today()).days, 0)
@@ -169,6 +179,7 @@ if st.button("ADD TRADE", type="primary", use_container_width=False):
             "DATE CLOSED":      None,
             "CLOSE PRICE":      None,
             "REALIZED PNL":     None,
+            "SIGNAL":           nt_signal,
             "NOTES":            nt_notes,
         }
         st.session_state["trades"] = pd.concat(

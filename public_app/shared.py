@@ -426,5 +426,6 @@ def score_put(ivr, ann_y, oi, sp, earn, dte_t, tech_s, conv):
                        (1 if not np.isnan(sp) and sp < 0.03 else -1 if not np.isnan(sp) and sp > 0.10 else 0)))
     earn_s = 5 if earn is None or earn > dte_t+5 else 4 if earn > dte_t else 2 if earn > 7 else 1
     sc = 0.30*ivr_s + 0.25*yld_s + 0.15*liq_s + 0.10*earn_s + 0.10*tech_s + 0.10*float(conv)
-    vd = "TRADE" if sc >= 3.8 else ("WATCH" if sc >= 3.0 else "PASS")
+    # Manual rule: trade only names scoring >= 4 (Put-Selling Prospect, OPS step 1)
+    vd = "TRADE" if sc >= 4.0 else ("WATCH" if sc >= 3.0 else "PASS")
     return round(sc, 2), vd
