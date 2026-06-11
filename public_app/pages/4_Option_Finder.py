@@ -153,7 +153,13 @@ if not ticker:
     st.info("SELECT A TICKER ABOVE OR TYPE ONE IN THE BOX, THEN CLICK LOAD.")
     st.stop()
 
-if not run:
+# A button is only True for the single rerun it was clicked on. Remember that
+# LOAD was pressed so interacting with widgets below (e.g. the payoff strike
+# selector) doesn't reset the page. After the first LOAD the view stays live
+# and re-fetches automatically when ticker/tenor/type/band change (5-min cache).
+if run:
+    st.session_state["finder_loaded"] = True
+if not st.session_state.get("finder_loaded"):
     st.info(f"TICKER: {ticker} — CLICK LOAD TO FETCH CHAIN.")
     st.stop()
 
