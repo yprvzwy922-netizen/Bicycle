@@ -203,6 +203,7 @@ else:
 chain["period_yield"] = mid_v / strike_v                    # actual yield over the trade's life
 chain["ann_yield"]    = (mid_v / strike_v) * (365.0 / dte)
 chain["cash_1ct"]     = chain["strike"] * 100
+chain["cts_25k"]      = np.floor(25000.0 / (strike_v * 100)).astype(int)  # contracts per $25k tranche
 chain["illiquid"]     = chain["spread_pct"].fillna(1) > 0.10
 
 # Drop any strikes whose delta could not be computed, then apply the band filter.
@@ -254,6 +255,8 @@ chain["score"] = (
 chain["score"] = chain["score"].round(1)
 
 # ── Display ───────────────────────────────────────────────────────────────────
+# Column order: STRIKE pinned first; VOLUME after ANN YIELD; SCORE after
+# VOLUME; CTS / $25K (contracts per $25k tranche) after SCORE.
 COLS = {
     "strike":          "STRIKE",
     "moneyness":       "MONEYNESS",
@@ -263,15 +266,16 @@ COLS = {
     "mid":             "MID",
     "period_yield":    "YIELD",
     "ann_yield":       "ANN YIELD",
+    "volume":          "VOLUME",
+    "score":           "SCORE",
+    "cts_25k":         "CTS / $25K",
     "cushion_pct":     "CUSHION / UPSIDE",
     "breakeven":       "BREAKEVEN",
     "eff_entry":       "EFF ENTRY VS SPOT",
     "cash_1ct":        "CASH SECURED (1CT)",
     "openInterest":    "OI",
-    "volume":          "VOLUME",
     "spread_pct":      "SPREAD %",
     "illiquid":        "ILLIQUID",
-    "score":           "SCORE",
 }
 # Keep the table sorted by strike (score lives in its own column on the right)
 chain = chain.sort_values("strike")
@@ -302,6 +306,7 @@ styled = (disp.style
         "MID":              "${:.2f}",
         "YIELD":            "{:.2%}",
         "ANN YIELD":        "{:.1%}",
+        "CTS / $25K":       "{:.0f}",
         "CUSHION / UPSIDE": "{:.1%}",
         "BREAKEVEN":        "${:.2f}",
         "EFF ENTRY VS SPOT":"{:.1%}",
@@ -309,7 +314,8 @@ styled = (disp.style
         "SPREAD %":         "{:.1%}",
     }, na_rep="—"))
 
-st.dataframe(styled, use_container_width=True, hide_index=True)
+st.dataframe(styled, use_container_width=True, hide_index=True,
+             column_config={"STRIKE": st.column_config.Column(pinned=True)})
 
 # ── Optimal strike highlight (top score) ──────────────────────────────────────
 best = chain.sort_values("score", ascending=False).iloc[0]
@@ -344,6 +350,15 @@ sel_strike = pp1.selectbox("STRIKE", strikes_list, index=default_idx,
                            format_func=lambda k: f"${k:.2f}")
 sel_row  = chain[chain["strike"] == sel_strike].iloc[0]
 sel_prem = float(sel_row["mid"]) if not np.isnan(sel_row["mid"]) else float(sel_row["bid"])
+
+# Live metrics for the selected strike (update on every change)
+pm1, pm2, pm3, pm4, pm5, pm6 = st.columns(6)
+pm1.metric("PREMIUM (MID)", f"${sel_prem:.2f}")
+pm2.metric("YIELD",         f"{sel_row['period_yield']:.2%}", help="Premium / strike over the trade's life")
+pm3.metric("ANN YIELD",     f"{sel_row['ann_yield']:.1%}",    help="Period yield x 365/DTE")
+pm4.metric("SCORE",         f"{sel_row['score']:.0f}/100")
+pm5.metric("DELTA",         f"{sel_row['delta']:.3f}")
+pm6.metric("CTS / $25K",    f"{int(sel_row['cts_25k'])}",     help="Contracts a $25k tranche covers at this strike")
 
 S = np.linspace(spot * 0.55, spot * 1.30, 300)
 intrinsic = np.maximum(sel_strike - S, 0) if opt == "put" else np.maximum(S - sel_strike, 0)
