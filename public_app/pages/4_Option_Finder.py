@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import datetime
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
 import bbg_style
@@ -325,6 +326,45 @@ st.caption(
 
 if chain["illiquid"].any():
     st.warning("ONE OR MORE STRIKES HAVE BID/ASK SPREAD > 10% — VERIFY LIQUIDITY WITH BROKER.")
+
+# ── Payoff at expiry ──────────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown("### PAYOFF AT EXPIRY (SHORT, 1 CONTRACT)")
+
+strikes_list = chain["strike"].tolist()
+default_idx  = strikes_list.index(best["strike"]) if best["strike"] in strikes_list else 0
+pp1, _ = st.columns([2, 8])
+sel_strike = pp1.selectbox("STRIKE", strikes_list, index=default_idx,
+                           format_func=lambda k: f"${k:.2f}")
+sel_row  = chain[chain["strike"] == sel_strike].iloc[0]
+sel_prem = float(sel_row["mid"]) if not np.isnan(sel_row["mid"]) else float(sel_row["bid"])
+
+S = np.linspace(spot * 0.55, spot * 1.30, 300)
+intrinsic = np.maximum(sel_strike - S, 0) if opt == "put" else np.maximum(S - sel_strike, 0)
+payoff = (sel_prem - intrinsic) * 100
+be = sel_strike - sel_prem if opt == "put" else sel_strike + sel_prem
+
+fig_po = go.Figure()
+fig_po.add_scatter(x=S, y=payoff, mode="lines", line=dict(color="#00c8ff", width=2),
+                   fill="tozeroy", fillcolor="rgba(0,200,255,0.06)")
+fig_po.add_hline(y=0, line_color="#444444", line_width=1)
+fig_po.add_vline(x=spot, line_color="#00e676", line_dash="dash",
+                 annotation_text=f"SPOT ${spot:.2f}", annotation_font_color="#00e676")
+fig_po.add_vline(x=sel_strike, line_color="#00c8ff", line_dash="dot",
+                 annotation_text=f"STRIKE ${sel_strike:.2f}", annotation_font_color="#00c8ff")
+fig_po.add_vline(x=be, line_color="#ff9900", line_dash="dot",
+                 annotation_text=f"BREAKEVEN ${be:.2f}", annotation_font_color="#ff9900",
+                 annotation_position="bottom right")
+fig_po.update_layout(
+    paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
+    font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
+    margin=dict(l=40, r=20, t=20, b=40), height=380, showlegend=False,
+    xaxis=dict(title="UNDERLYING AT EXPIRY", gridcolor="#1e1e1e", tickprefix="$"),
+    yaxis=dict(title="P&L PER CONTRACT", gridcolor="#1e1e1e", tickprefix="$"))
+st.plotly_chart(fig_po, use_container_width=True)
+st.caption(f"MAX PROFIT ${sel_prem*100:,.0f} (PREMIUM)  |  "
+           f"BREAKEVEN ${be:.2f} ({(be-spot)/spot:+.1%} FROM SPOT)  |  "
+           f"GTC BUY-TO-CLOSE TARGET (50%): ${sel_prem/2:.2f}")
 
 st.markdown("---")
 st.caption("DECISION SUPPORT ONLY | ALWAYS RECONCILE PREMIUM, IV, AND DELTA WITH BROKER LIVE CHAIN BEFORE TRADING")

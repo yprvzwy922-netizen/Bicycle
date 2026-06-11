@@ -7,8 +7,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import datetime
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 import bbg_style
+import db
 
 st.set_page_config(page_title="Trade Log", layout="wide")
 bbg_style.inject()
@@ -23,20 +25,14 @@ with c_nav1:
     if st.button("HOME"): st.switch_page("app.py")
 
 st.title("TRADE LOG")
-st.caption("DTE, CASH SECURED, AND MAX LOSS ARE AUTO-CALCULATED FROM YOUR INPUTS | EXPORT CSV TO SAVE BETWEEN SESSIONS")
+if db.configured():
+    st.caption("STORAGE: SUPABASE (SHARED, PERSISTENT — SAME BOOK ON EVERY PC) | DTE, CASH SECURED, MAX LOSS AUTO-CALCULATED")
+else:
+    st.caption("STORAGE: SESSION ONLY — EXPORT CSV BEFORE CLOSING | SET SUPABASE SECRETS TO ENABLE SHARED PERSISTENCE")
 
-# ── Session store ─────────────────────────────────────────────────────────────
-COLUMNS = [
-    "ID","DATE OPENED","TICKER","STRATEGY",
-    "SHORT STRIKE","LONG STRIKE","EXPIRY","DTE OPEN",
-    "CONTRACTS","PREMIUM / CREDIT","CASH SECURED","MAX LOSS",
-    "STATUS","DATE CLOSED","CLOSE PRICE","REALIZED PNL","SIGNAL","NOTES"
-]
-
-if "trades" not in st.session_state:
-    st.session_state["trades"] = pd.DataFrame(columns=COLUMNS)
-
-trades: pd.DataFrame = st.session_state["trades"]
+# ── Store (DB-backed when configured, session otherwise) ──────────────────────
+COLUMNS = db.TRADE_COLUMNS
+trades: pd.DataFrame = db.get_trades_df()
 
 # ── Import / Export ───────────────────────────────────────────────────────────
 c_imp, c_exp, _ = st.columns([2, 2, 6])
@@ -45,10 +41,19 @@ with c_imp:
     if uploaded:
         try:
             loaded = pd.read_csv(uploaded)
-            st.session_state["trades"] = loaded
-            trades = loaded
-            st.success(f"Loaded {len(loaded)} trades.")
-            st.rerun()
+            for c in COLUMNS:
+                if c not in loaded.columns:
+                    loaded[c] = None
+            loaded = loaded[COLUMNS]
+            # Import key changes each upload so the same file isn't re-imported every rerun
+            imp_key = f"{uploaded.name}_{len(loaded)}"
+            if st.session_state.get("last_import") != imp_key:
+                merged = pd.concat([trades, loaded], ignore_index=True)
+                merged = merged.drop_duplicates(subset=["ID"], keep="last")
+                db.save_trades_df(merged)
+                st.session_state["last_import"] = imp_key
+                st.success(f"Imported {len(loaded)} trades (merged by ID).")
+                st.rerun()
         except Exception as e:
             st.error(f"Failed: {e}")
 with c_exp:
@@ -182,8 +187,7 @@ if st.button("ADD TRADE", type="primary", use_container_width=False):
             "SIGNAL":           nt_signal,
             "NOTES":            nt_notes,
         }
-        st.session_state["trades"] = pd.concat(
-            [trades, pd.DataFrame([new_row])], ignore_index=True)
+        db.save_trades_df(pd.concat([trades, pd.DataFrame([new_row])], ignore_index=True))
         st.success(f"Added: {nt_strategy} on {nt_ticker} | Strike ${nt_short_strike:.2f} | Expiry {nt_expiry} | Credit ${nt_premium*100*nt_contracts:,.0f}")
         st.rerun()
 
@@ -234,7 +238,7 @@ if not open_trades.empty:
         trades.at[idx, "DATE CLOSED"] = close_date.isoformat()
         trades.at[idx, "CLOSE PRICE"] = close_price
         trades.at[idx, "REALIZED PNL"]= round(realized, 2)
-        st.session_state["trades"] = trades
+        db.save_trades_df(trades)
         st.success(f"Trade #{close_id} closed. P&L: ${realized:,.2f}")
         st.rerun()
 else:
@@ -277,7 +281,14 @@ if not trades.empty:
         }
     )
     if not edited.equals(trades):
-        st.session_state["trades"] = edited
+        # Rows added in the editor get the next free ID before persisting
+        if edited["ID"].isna().any():
+            ids = pd.to_numeric(edited["ID"], errors="coerce")
+            nxt = int(ids.max()) + 1 if ids.notna().any() else 1
+            for i in edited.index[ids.isna()]:
+                edited.at[i, "ID"] = nxt
+                nxt += 1
+        db.save_trades_df(edited)
         st.rerun()
 
     # P&L by strategy
@@ -290,8 +301,36 @@ if not trades.empty:
         st.dataframe(
             by_strat.style.format({"TOTAL PNL":"${:,.2f}","AVG PNL":"${:,.2f}"}),
             use_container_width=True, hide_index=True)
+
+    # ── Income chart — realized premium vs the plan ───────────────────────────
+    if not closed.empty and closed["DATE CLOSED"].notna().any():
+        inc = closed[closed["DATE CLOSED"].notna()].copy()
+        inc["MONTH"] = pd.to_datetime(inc["DATE CLOSED"], errors="coerce").dt.to_period("M").astype(str)
+        monthly = inc.groupby("MONTH")["REALIZED PNL"].sum().reset_index()
+        monthly["CUMULATIVE"] = monthly["REALIZED PNL"].cumsum()
+
+        st.markdown("### REALIZED INCOME")
+        fig = go.Figure()
+        fig.add_bar(x=monthly["MONTH"], y=monthly["REALIZED PNL"], name="MONTHLY P&L",
+                    marker_color="#00c8ff")
+        fig.add_scatter(x=monthly["MONTH"], y=monthly["CUMULATIVE"], name="CUMULATIVE",
+                        mode="lines+markers", line=dict(color="#00e676", width=2))
+        # Manual plan: 30% on $1M = ~$25k/month glidepath
+        fig.add_scatter(x=monthly["MONTH"], y=[25000*(i+1) for i in range(len(monthly))],
+                        name="PLAN (30% / $25K MO)", mode="lines",
+                        line=dict(color="#ff9900", width=1, dash="dot"))
+        fig.update_layout(
+            paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
+            font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
+            legend=dict(orientation="h", y=1.1),
+            margin=dict(l=40, r=20, t=30, b=40), height=360,
+            xaxis=dict(gridcolor="#1e1e1e"), yaxis=dict(gridcolor="#1e1e1e", tickprefix="$"))
+        st.plotly_chart(fig, use_container_width=True)
 else:
     st.info("No trades yet. Add your first trade above.")
 
 st.markdown("---")
-st.caption("SESSION ONLY — EXPORT CSV BEFORE CLOSING BROWSER")
+if db.configured():
+    st.caption("STORAGE: SUPABASE — TRADES SHARED ACROSS ALL PCS AND SESSIONS")
+else:
+    st.caption("SESSION ONLY — EXPORT CSV BEFORE CLOSING BROWSER")

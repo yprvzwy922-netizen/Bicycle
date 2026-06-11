@@ -41,21 +41,44 @@ DEFAULT_WATCHLIST = [
 SECTORS = sorted(set(w["sector"] for w in DEFAULT_WATCHLIST))
 TICKERS = [w["ticker"] for w in DEFAULT_WATCHLIST]
 
+import db
+
 def get_watchlist():
-    """Returns session watchlist (starts from defaults, editable during session)."""
+    """DB-backed when Supabase is configured (shared across PCs); else session.
+    First DB run seeds the table from DEFAULT_WATCHLIST."""
+    if db.configured():
+        wl = db.load_watchlist()
+        if wl:
+            return wl
+        try:
+            db.seed_watchlist(DEFAULT_WATCHLIST)
+        except Exception:
+            pass
+        return DEFAULT_WATCHLIST
     if "watchlist" not in st.session_state:
         st.session_state["watchlist"] = {w["ticker"]: w for w in DEFAULT_WATCHLIST}
     return list(st.session_state["watchlist"].values())
 
 def add_to_watchlist(ticker, company="", sector="Technology", bucket="Growth", conviction=3, delta_band="Income"):
+    item = {"ticker": ticker.upper(), "company": company, "sector": sector,
+            "bucket": bucket, "conviction": conviction, "delta_band": delta_band}
+    if db.configured():
+        try:
+            db.upsert_watchlist_item(item)
+            return
+        except Exception as e:
+            st.warning(f"DB write failed — added for this session only. ({e})")
     if "watchlist" not in st.session_state:
         st.session_state["watchlist"] = {w["ticker"]: w for w in DEFAULT_WATCHLIST}
-    st.session_state["watchlist"][ticker.upper()] = {
-        "ticker": ticker.upper(), "company": company, "sector": sector,
-        "bucket": bucket, "conviction": conviction, "delta_band": delta_band
-    }
+    st.session_state["watchlist"][ticker.upper()] = item
 
 def remove_from_watchlist(ticker):
+    if db.configured():
+        try:
+            db.delete_watchlist_item(ticker)
+            return
+        except Exception as e:
+            st.warning(f"DB delete failed. ({e})")
     if "watchlist" in st.session_state:
         st.session_state["watchlist"].pop(ticker.upper(), None)
 

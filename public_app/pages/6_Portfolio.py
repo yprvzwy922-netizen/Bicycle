@@ -7,8 +7,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 import bbg_style
+import db
 from shared import (get_watchlist, fetch_spot, bs_put_delta, bs_call_delta,
                     fetch_option_live)
 import datetime
@@ -52,8 +54,8 @@ with st.sidebar:
         "A net $ delta of +$50k means your P&L moves like you own $50k of stock."
     )
 
-# ── Get open trades ───────────────────────────────────────────────────────────
-trades = st.session_state.get("trades", pd.DataFrame())
+# ── Get open trades (DB-backed when configured) ───────────────────────────────
+trades = db.get_trades_df()
 
 if trades.empty or (trades["STATUS"] == "OPEN").sum() == 0:
     st.info("No open trades in the Trade Log. Add trades in the Trade Log page first.")
@@ -229,6 +231,12 @@ for _, t in open_trades.iterrows():
         "ACTION":        action,
         "CASH AT RISK":  cash_sec,
         "MAX LOSS":      max_loss,
+        # hidden fields for the stress test (dropped before display)
+        "_LONG_STRIKE":  long_strike,
+        "_IS_PUT":       is_put,
+        "_IS_SHORT":     is_short,
+        "_IS_SPREAD":    is_spread,
+        "_PREM":         prem,
     })
 
 book = pd.DataFrame(rows)
@@ -302,7 +310,8 @@ fmt = {
     "% MAX PROFIT":  "{:.0%}",
     "YIELD LEFT":    "{:.1%}",
 }
-styled_book = (book.style
+disp_book = book[[c for c in book.columns if not c.startswith("_")]]
+styled_book = (disp_book.style
     .map(color_dte,        subset=["DTE LEFT"])
     .map(color_pnl,        subset=["UNREAL PNL"])
     .map(color_delta,      subset=["DELTA"])
@@ -330,6 +339,59 @@ if tot_tm > 0:
     if not in_band:
         st.warning(f"TENOR MIX OUT OF BAND: 1M = {pct_1m:.0%} (target 60-70%). "
                    f"{'Shift new tranches to 3M.' if pct_1m > 0.70 else 'Shift new tranches to 1M.'}")
+
+st.markdown("---")
+
+# ── Stress test — basket shock at expiry (manual §9 scenario C, live book) ────
+st.markdown("### STRESS TEST — BASKET SHOCK")
+st.caption("Every position repriced at EXPIRY with all underlyings moved by the shock "
+           "(intrinsic value vs premium received). Worst-case view: correlated selloff, no management. "
+           "Covered-call stock legs and T-bill interest are not modeled.")
+
+def book_pnl_at(shock: float) -> float:
+    total = 0.0
+    for _, r in book.iterrows():
+        spot_r = r["SPOT"]
+        if spot_r is None or np.isnan(spot_r): continue
+        s = spot_r * (1 + shock)
+        k, kl   = r["SHORT STRIKE"] or 0, r["_LONG_STRIKE"] or 0
+        prem    = r["_PREM"] or 0
+        ctrs    = r["CONTRACTS"]
+        if not k: continue
+        intr = max(k - s, 0) if r["_IS_PUT"] else max(s - k, 0)
+        if r["_IS_SPREAD"] and kl:
+            intr -= max(kl - s, 0) if r["_IS_PUT"] else max(s - kl, 0)
+        pnl = (prem - intr) if r["_IS_SHORT"] else (intr - prem)
+        total += pnl * 100 * ctrs
+    return total
+
+shocks   = np.arange(-0.60, 0.21, 0.05)
+curve    = [book_pnl_at(s) for s in shocks]
+sel_shock = st.slider("BASKET SHOCK %", -60, 20, -20, 5) / 100
+pnl_at_sel = book_pnl_at(sel_shock)
+
+s1, s2, s3 = st.columns(3)
+s1.metric(f"P&L AT {sel_shock:+.0%}", f"${pnl_at_sel:,.0f}")
+s2.metric("VS TOTAL CAPITAL", f"{pnl_at_sel/TOTAL_CAPITAL:+.1%}")
+dd_ok = pnl_at_sel/TOTAL_CAPITAL > -0.30
+s3.metric("DRAWDOWN TOLERANCE (20-30%)", "WITHIN" if dd_ok else "BREACHED")
+
+fig_st = go.Figure()
+fig_st.add_scatter(x=shocks*100, y=curve, mode="lines", name="P&L AT EXPIRY",
+                   line=dict(color="#00c8ff", width=2))
+fig_st.add_hline(y=0, line_color="#444444", line_width=1)
+fig_st.add_hline(y=-0.20*TOTAL_CAPITAL, line_color="#ff9900", line_dash="dot",
+                 annotation_text="-20% CAPITAL", annotation_font_color="#ff9900")
+fig_st.add_hline(y=-0.30*TOTAL_CAPITAL, line_color="#ff4444", line_dash="dot",
+                 annotation_text="-30% CAPITAL", annotation_font_color="#ff4444")
+fig_st.add_vline(x=sel_shock*100, line_color="#00e676", line_dash="dash")
+fig_st.update_layout(
+    paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
+    font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
+    margin=dict(l=40, r=20, t=20, b=40), height=380, showlegend=False,
+    xaxis=dict(title="BASKET MOVE %", gridcolor="#1e1e1e", ticksuffix="%"),
+    yaxis=dict(title="P&L AT EXPIRY", gridcolor="#1e1e1e", tickprefix="$"))
+st.plotly_chart(fig_st, use_container_width=True)
 
 st.markdown("---")
 
@@ -443,6 +505,27 @@ for label, ok, detail, val, lim in checks:
             <div style='background:{bar_color};height:100%;width:{fill/1.5*100:.0f}%;'></div>
             </div>""",
             unsafe_allow_html=True)
+
+# ── Equity history (daily snapshots, written by the GitHub Actions job) ───────
+if db.configured():
+    snaps = db.load_portfolio_snapshots()
+    if not snaps.empty and "snap_date" in snaps.columns:
+        st.markdown("---")
+        st.markdown("### P&L HISTORY (DAILY SNAPSHOTS)")
+        snaps = snaps.sort_values("snap_date")
+        total_line = (pd.to_numeric(snaps.get("realized_pnl"), errors="coerce").fillna(0) +
+                      pd.to_numeric(snaps.get("unreal_pnl"),  errors="coerce").fillna(0))
+        fig_eq = go.Figure()
+        fig_eq.add_scatter(x=snaps["snap_date"], y=total_line, mode="lines+markers",
+                           name="REALIZED + UNREALIZED",
+                           line=dict(color="#00c8ff", width=2))
+        fig_eq.update_layout(
+            paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
+            font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
+            margin=dict(l=40, r=20, t=20, b=40), height=320, showlegend=False,
+            xaxis=dict(gridcolor="#1e1e1e"), yaxis=dict(gridcolor="#1e1e1e", tickprefix="$"))
+        st.plotly_chart(fig_eq, use_container_width=True)
+        st.caption("ONE POINT PER TRADING DAY — WRITTEN AUTOMATICALLY AFTER US CLOSE BY THE SNAPSHOT JOB")
 
 st.markdown("---")
 st.caption("IV FROM LIVE OPTION CHAIN (1-MIN CACHE) | DELTA USES BLACK-SCHOLES EUROPEAN APPROX | NOT EXECUTION READY")
