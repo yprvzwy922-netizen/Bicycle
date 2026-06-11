@@ -193,6 +193,7 @@ else:
     chain["breakeven"]   = chain["strike"] + chain["mid"]
     chain["eff_entry"]   = (strike_v + mid_v) / spot - 1
 
+chain["period_yield"] = mid_v / strike_v                    # actual yield over the trade's life
 chain["ann_yield"]    = (mid_v / strike_v) * (365.0 / dte)
 chain["cash_1ct"]     = chain["strike"] * 100
 chain["illiquid"]     = chain["spread_pct"].fillna(1) > 0.10
@@ -253,6 +254,7 @@ COLS = {
     "delta":           "DELTA",
     "bid":             "BID",
     "mid":             "MID",
+    "period_yield":    "YIELD",
     "ann_yield":       "ANN YIELD",
     "cushion_pct":     "CUSHION / UPSIDE",
     "breakeven":       "BREAKEVEN",
@@ -291,6 +293,7 @@ styled = (disp.style
         "DELTA":            "{:.3f}",
         "BID":              "${:.2f}",
         "MID":              "${:.2f}",
+        "YIELD":            "{:.2%}",
         "ANN YIELD":        "{:.1%}",
         "CUSHION / UPSIDE": "{:.1%}",
         "BREAKEVEN":        "${:.2f}",
