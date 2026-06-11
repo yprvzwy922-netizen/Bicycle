@@ -12,7 +12,7 @@ import streamlit as st
 import bbg_style
 import db
 from shared import (get_watchlist, fetch_spot, bs_put_delta, bs_call_delta,
-                    fetch_option_live)
+                    bs_price, fetch_option_live)
 import datetime
 
 st.set_page_config(page_title="Portfolio & Risk", layout="wide")
@@ -39,6 +39,7 @@ with st.sidebar:
     MAX_PER_TRADE   = st.slider("MAX SINGLE TRADE %",     1,  10,  3) / 100   # <=2-3% per trade
     MAX_SPECULATIVE = st.slider("MAX SPECULATIVE %",     10,  50, 40) / 100   # <=40% spec bucket
     MAX_SECTOR      = st.slider("MAX SECTOR %",          10,  50, 30) / 100   # <=30% per sector
+    MAX_STOCK_INV   = st.slider("MAX STOCK INVENTORY %", 10,  60, 40) / 100   # manual §8.3 ceiling
     MAX_DEPLOYED    = st.slider("MAX % DEPLOYED",        50, 100, 100) / 100  # 100% invested mandate
     MIN_CASH_BUFFER = st.slider("MIN CASH BUFFER %",      0,  40,  0) / 100   # no idle cash
     MAX_DELTA_TOTAL = st.number_input("MAX NET DELTA ($ notional)", 0, 10_000_000, 500_000, 5_000,
@@ -46,11 +47,13 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### DELTA EXPLAINED")
     st.caption(
-        "NET $ DELTA = Σ (delta × contracts × 100 × spot price)\n\n"
+        "NET $ DELTA = Σ (delta × contracts × multiplier × spot)\n\n"
         "Shows total directional dollar exposure:\n"
         "• Short Put = +delta (bullish — you profit if stock rises)\n"
-        "• Short Call = -delta (bearish — you profit if stock falls)\n"
-        "• Long Put  = -delta | Long Call = +delta\n\n"
+        "• Short Call = -delta (bearish)\n"
+        "• Covered Call = stock + short call = 1 − call delta (bullish, capped)\n"
+        "• Long Stock = +1.0 per share\n"
+        "• Long Put = -delta | Long Call = +delta\n\n"
         "A net $ delta of +$50k means your P&L moves like you own $50k of stock."
     )
 
@@ -77,118 +80,129 @@ for _, t in open_trades.iterrows():
     except Exception:
         spot = float("nan")
 
-    # DTE remaining
-    try:
-        exp_dt  = datetime.datetime.strptime(str(t["EXPIRY"]), "%Y-%m-%d").date()
-        dte_rem = max((exp_dt - datetime.date.today()).days, 0)
-    except Exception:
-        dte_rem = 0
-
     strat        = str(t["STRATEGY"])
+    is_stock     = strat == "Long Stock"
+    is_cc        = strat == "Covered Call"
+    mult         = 1 if is_stock else 100            # stock P&L is per share
     short_strike = float(t["SHORT STRIKE"]) if pd.notna(t["SHORT STRIKE"]) else 0.0
     long_strike  = float(t["LONG STRIKE"])  if pd.notna(t["LONG STRIKE"])  else 0.0
     ctrs         = int(t["CONTRACTS"])
     prem         = float(t["PREMIUM / CREDIT"]) if pd.notna(t["PREMIUM / CREDIT"]) else 0.0
     expiry_str   = str(t["EXPIRY"])
 
-    # ── Live IV + current mid ──────────────────────────────────────────────────
-    is_put  = "Put" in strat or "put" in strat
-    is_call = "Call" in strat or "call" in strat
-    is_short = True  # all strategies in our log are short-side except Long Put/Call
-    if strat in ("Long Put (Hedge)", "Long Call"):
-        is_short = False
+    # DTE remaining (stock has no expiry)
+    dte_rem = None
+    if not is_stock:
+        try:
+            exp_dt  = datetime.datetime.strptime(expiry_str, "%Y-%m-%d").date()
+            dte_rem = max((exp_dt - datetime.date.today()).days, 0)
+        except Exception:
+            dte_rem = 0
 
-    opt_type_str = "put" if is_put else "call"
+    # ── Live IV + current mid (options only) ──────────────────────────────────
+    is_put  = "Put" in strat
+    is_call = "Call" in strat
+    is_short = not is_stock and strat not in ("Long Put (Hedge)", "Long Call")
 
     curr_mid, live_iv = float("nan"), float("nan")
-    if short_strike > 0 and expiry_str and expiry_str != "nan":
+    if not is_stock and short_strike > 0 and expiry_str and expiry_str not in ("nan", "None", ""):
         try:
-            curr_mid, live_iv = fetch_option_live(tkr, short_strike, expiry_str, opt_type_str)
+            curr_mid, live_iv = fetch_option_live(
+                tkr, short_strike, expiry_str, "put" if is_put else "call")
         except Exception:
             pass
 
-    iv_used = live_iv if not np.isnan(live_iv) else 0.35   # fallback 35%
+    iv_used = float("nan") if is_stock else (live_iv if not np.isnan(live_iv) else 0.35)
 
     # ── Delta (live IV via Black-Scholes) ──────────────────────────────────────
     # Sign convention:
-    #   Short Put  = +delta (bullish: you profit when stock goes up)
-    #   Short Call = -delta (bearish)
-    #   Long Put   = -delta, Long Call = +delta
+    #   Long Stock   = +1.0 per share
+    #   Short Put    = +delta (bullish) | Short Call (naked) = -delta
+    #   Covered Call = stock + short call = 1 - call_delta (bullish, capped)
+    #   Long Put     = -delta | Long Call = +delta
     delta        = float("nan")
     dollar_delta = float("nan")
     try:
-        if is_put and short_strike > 0:
+        if is_stock:
+            delta = 1.0
+        elif is_cc and short_strike > 0:
+            d = abs(bs_call_delta(spot, short_strike, iv_used, dte_rem))
+            delta = 1.0 - d                    # owned stock (+1) plus short call (-d)
+        elif is_put and short_strike > 0:
             d = abs(bs_put_delta(spot, short_strike, iv_used, dte_rem))
             delta = +d if is_short else -d     # short put = +delta
         elif is_call and short_strike > 0:
             d = abs(bs_call_delta(spot, short_strike, iv_used, dte_rem))
-            delta = -d if is_short else +d     # short call = -delta
+            delta = -d if is_short else +d     # short (naked) call = -delta
 
         # Spread: long leg offsets
         if "Spread" in strat and long_strike > 0:
             if is_put:
                 d_long = abs(bs_put_delta(spot, long_strike, iv_used, dte_rem))
-                delta = delta - d_long  # long put = -delta, reduces net
+                delta = delta - d_long
             elif is_call:
                 d_long = abs(bs_call_delta(spot, long_strike, iv_used, dte_rem))
-                delta = delta + d_long  # long call offsets short call
+                delta = delta + d_long
 
         if not np.isnan(delta) and not np.isnan(spot):
-            dollar_delta = delta * ctrs * 100 * spot
+            dollar_delta = delta * ctrs * mult * spot
     except Exception:
         pass
 
-    # ── Unrealized P&L using live mid ─────────────────────────────────────────
-    if not np.isnan(curr_mid) and prem > 0:
+    # ── Unrealized P&L ────────────────────────────────────────────────────────
+    if is_stock and not np.isnan(spot) and prem > 0:
+        unreal = (spot - prem) * ctrs              # vs entry price, per share
+    elif not np.isnan(curr_mid) and prem > 0:
         if is_short:
-            unreal = (prem - curr_mid) * 100 * ctrs   # profit when price falls
+            unreal = (prem - curr_mid) * 100 * ctrs   # option leg only for covered calls
         else:
-            unreal = (curr_mid - prem) * 100 * ctrs   # profit when price rises
+            unreal = (curr_mid - prem) * 100 * ctrs
     else:
         unreal = float("nan")
 
-    # ── Profit-take tracker (manual §5.1) ─────────────────────────────────────
-    # % of max profit captured = (premium - current mid) / premium for shorts.
-    # Manage-by: 1M trades at 21 DTE, 3M trades at 45 DTE (tenor from DTE OPEN).
-    dte_open = int(t["DTE OPEN"]) if pd.notna(t.get("DTE OPEN")) else 35
-    tenor    = "3M" if dte_open > 60 else "1M"
-    manage_at = 45 if tenor == "3M" else 21
-
+    # ── Profit-take tracker (manual §5.1) — options only ──────────────────────
     pct_max_profit = float("nan")
-    if is_short and prem > 0 and not np.isnan(curr_mid):
-        pct_max_profit = (prem - curr_mid) / prem
-
-    # Annualized yield of the premium still on the table (manual: close if < ~15%)
-    yield_left = float("nan")
-    if is_short and short_strike > 0 and dte_rem > 0 and not np.isnan(curr_mid):
-        yield_left = (curr_mid / short_strike) * (365.0 / dte_rem)
-
-    # Action flag per the manual's procedure
-    if not np.isnan(pct_max_profit) and pct_max_profit >= 0.90:
-        action = "CLOSE (90%+)"
-    elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.50 and \
-         not np.isnan(yield_left) and yield_left < 0.15:
-        action = "CLOSE (YIELD LEFT < 15%)"
-    elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.75:
-        action = "TAKE 75% TIER"
-    elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.50:
-        action = "TAKE 50% TIER"
-    elif dte_rem <= manage_at:
-        action = f"MANAGE ({tenor} @ {manage_at} DTE)"
+    yield_left     = float("nan")
+    action         = ""
+    if is_stock:
+        tenor = "STK"
     else:
-        action = ""
+        dte_open  = int(t["DTE OPEN"]) if pd.notna(t.get("DTE OPEN")) else 35
+        tenor     = "3M" if dte_open > 60 else "1M"
+        manage_at = 45 if tenor == "3M" else 21
+
+        if is_short and prem > 0 and not np.isnan(curr_mid):
+            pct_max_profit = (prem - curr_mid) / prem
+        if is_short and short_strike > 0 and dte_rem and dte_rem > 0 and not np.isnan(curr_mid):
+            yield_left = (curr_mid / short_strike) * (365.0 / dte_rem)
+
+        if not np.isnan(pct_max_profit) and pct_max_profit >= 0.90:
+            action = "CLOSE (90%+)"
+        elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.50 and \
+             not np.isnan(yield_left) and yield_left < 0.15:
+            action = "CLOSE (YIELD LEFT < 15%)"
+        elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.75:
+            action = "TAKE 75% TIER"
+        elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.50:
+            action = "TAKE 50% TIER"
+        elif dte_rem is not None and dte_rem <= manage_at:
+            action = f"MANAGE ({tenor} @ {manage_at} DTE)"
 
     # ── Cash at risk / max loss (strategy-aware) ───────────────────────────────
     # Use the Trade Log's stored values when present, otherwise derive correctly
     # per strategy — NEVER fall back to strike*100 for spreads/covered calls,
     # which would massively overstate deployed capital.
     is_spread = "Spread" in strat
-    is_covered_call = strat == "Covered Call"
+    is_covered_call = is_cc
 
     stored_cash = float(t["CASH SECURED"]) if pd.notna(t.get("CASH SECURED")) else None
     stored_loss = float(t["MAX LOSS"])     if pd.notna(t.get("MAX LOSS"))     else None
 
-    if is_spread:
+    if is_stock:
+        # Long stock: capital deployed = cost basis; worst case stock -> $0
+        cash_sec = stored_cash if stored_cash is not None else prem * ctrs
+        max_loss = stored_loss if stored_loss is not None else cash_sec
+    elif is_spread:
         # Defined-risk: capital at risk = max loss = (width - net credit) * 100
         if stored_loss is not None:
             max_loss = stored_loss
@@ -222,7 +236,7 @@ for _, t in open_trades.iterrows():
         "CONTRACTS":     ctrs,
         "PREM RECEIVED": prem,
         "CURRENT MID":   round(curr_mid, 2)      if not np.isnan(curr_mid)    else None,
-        "IV USED":       round(iv_used, 4),
+        "IV USED":       round(iv_used, 4)       if not np.isnan(iv_used)     else None,
         "DELTA":         round(delta, 3)          if not np.isnan(delta)      else None,
         "$ DELTA":       round(dollar_delta, 0)   if not np.isnan(dollar_delta) else None,
         "UNREAL PNL":    round(unreal, 2)          if not np.isnan(unreal)    else None,
@@ -236,7 +250,12 @@ for _, t in open_trades.iterrows():
         "_IS_PUT":       is_put,
         "_IS_SHORT":     is_short,
         "_IS_SPREAD":    is_spread,
+        "_IS_STOCK":     is_stock,
+        "_IS_CC":        is_cc,
         "_PREM":         prem,
+        "_MULT":         mult,
+        "_IV":           iv_used,
+        "_DTE_REM":      dte_rem if dte_rem is not None else 0,
     })
 
 book = pd.DataFrame(rows)
@@ -320,13 +339,14 @@ styled_book = (disp_book.style
     .format(fmt, na_rep="—"))
 
 st.dataframe(styled_book, use_container_width=True, hide_index=True)
-st.caption("DELTA SIGN: +ve = bullish (short put / long call) | -ve = bearish (short call / long put)  |  IV from live option chain, fallback 35%")
+st.caption("DELTA: short put = +d | naked short call = -d | covered call = 1-d (stock + short call) | long stock = +1  |  "
+           "IV from live option chain, fallback 35%  |  COVERED CALL UNREAL PNL = option leg only (stock basis not tracked)")
 st.caption("PROFIT-TAKE PROCEDURE (MANUAL §5.1): GTC BUY-TO-CLOSE AT 50% ON ENTRY → CLOSE 1/2 AT 50%, 1/4 AT 75%, REST BY 90% OR MANAGE-BY DATE (1M @ 21 DTE, 3M @ 45 DTE). "
            "YIELD LEFT = ANNUALIZED YIELD OF PREMIUM STILL ON THE TABLE — IF < 15% AFTER THE 50% TIER, CLOSE AND REDEPLOY.")
 
-# ── Tenor mix (manual: ~60-70% 1M / ~30-40% 3M) ──────────────────────────────
+# ── Tenor mix (manual: ~60-70% 1M / ~30-40% 3M) — options only ───────────────
 st.markdown("### TENOR MIX")
-tm = book.groupby("TENOR")["CASH AT RISK"].sum()
+tm = book[book["TENOR"].isin(["1M", "3M"])].groupby("TENOR")["CASH AT RISK"].sum()
 cash_1m, cash_3m = float(tm.get("1M", 0)), float(tm.get("3M", 0))
 tot_tm = cash_1m + cash_3m
 if tot_tm > 0:
@@ -342,33 +362,64 @@ if tot_tm > 0:
 
 st.markdown("---")
 
-# ── Stress test — basket shock at expiry (manual §9 scenario C, live book) ────
+# ── Stress test — basket shock, both directions (manual §9 on the live book) ──
 st.markdown("### STRESS TEST — BASKET SHOCK")
-st.caption("Every position repriced at EXPIRY with all underlyings moved by the shock "
-           "(intrinsic value vs premium received). Worst-case view: correlated selloff, no management. "
-           "Covered-call stock legs and T-bill interest are not modeled.")
 
-def book_pnl_at(shock: float) -> float:
+sm1, sm2 = st.columns([3, 7])
+stress_mode = sm1.radio("VALUATION MODE", ["HOLD TO EXPIRY", "INSTANT SHOCK"],
+                        horizontal=True,
+                        help="HOLD TO EXPIRY: each option valued at intrinsic on ITS OWN expiry "
+                             "(P&L vs entry premium — matches the payoff diagrams). "
+                             "INSTANT SHOCK: all positions repriced TODAY with Black-Scholes at "
+                             "their own remaining DTE and live IV — one common horizon, which is "
+                             "how a book with multiple expiries is stressed consistently.")
+
+st.caption("Stock legs included: Long Stock P&L vs entry price; covered calls assume you own 100 sh/contract "
+           "(stock leg measured from current spot — entry basis unknown). IV held constant in INSTANT mode "
+           "(a real crash lifts IV, making short-option marks temporarily worse). T-bill interest not modeled.")
+
+def book_pnl_at(shock: float, mode: str) -> float:
     total = 0.0
     for _, r in book.iterrows():
         spot_r = r["SPOT"]
-        if spot_r is None or np.isnan(spot_r): continue
-        s = spot_r * (1 + shock)
-        k, kl   = r["SHORT STRIKE"] or 0, r["_LONG_STRIKE"] or 0
-        prem    = r["_PREM"] or 0
-        ctrs    = r["CONTRACTS"]
-        if not k: continue
-        intr = max(k - s, 0) if r["_IS_PUT"] else max(s - k, 0)
-        if r["_IS_SPREAD"] and kl:
-            intr -= max(kl - s, 0) if r["_IS_PUT"] else max(s - kl, 0)
-        pnl = (prem - intr) if r["_IS_SHORT"] else (intr - prem)
+        if spot_r is None or (isinstance(spot_r, float) and np.isnan(spot_r)):
+            continue
+        s    = spot_r * (1 + shock)
+        ctrs = r["CONTRACTS"]
+        prem = r["_PREM"] or 0
+
+        # Pure stock position: P&L vs entry price, per share
+        if r["_IS_STOCK"]:
+            if prem > 0:
+                total += (s - prem) * ctrs
+            continue
+
+        k, kl = r["SHORT STRIKE"] or 0, r["_LONG_STRIKE"] or 0
+        if not k:
+            continue
+
+        # Covered call: add the owned-stock leg (100 sh per contract, from current spot)
+        if r["_IS_CC"]:
+            total += (s - spot_r) * 100 * ctrs
+
+        kind = "put" if r["_IS_PUT"] else "call"
+        if mode == "INSTANT SHOCK":
+            v = bs_price(s, k, r["_IV"], r["_DTE_REM"], kind=kind)
+            if r["_IS_SPREAD"] and kl:
+                v -= bs_price(s, kl, r["_IV"], r["_DTE_REM"], kind=kind)
+        else:  # HOLD TO EXPIRY -> intrinsic
+            v = max(k - s, 0) if r["_IS_PUT"] else max(s - k, 0)
+            if r["_IS_SPREAD"] and kl:
+                v -= max(kl - s, 0) if r["_IS_PUT"] else max(s - kl, 0)
+
+        pnl = (prem - v) if r["_IS_SHORT"] else (v - prem)
         total += pnl * 100 * ctrs
     return total
 
-shocks   = np.arange(-0.60, 0.21, 0.05)
-curve    = [book_pnl_at(s) for s in shocks]
-sel_shock = st.slider("BASKET SHOCK %", -60, 20, -20, 5) / 100
-pnl_at_sel = book_pnl_at(sel_shock)
+shocks     = np.arange(-0.60, 0.61, 0.05)
+curve      = [book_pnl_at(s, stress_mode) for s in shocks]
+sel_shock  = st.slider("BASKET SHOCK %", -60, 60, -20, 5) / 100
+pnl_at_sel = book_pnl_at(sel_shock, stress_mode)
 
 s1, s2, s3 = st.columns(3)
 s1.metric(f"P&L AT {sel_shock:+.0%}", f"${pnl_at_sel:,.0f}")
@@ -377,7 +428,7 @@ dd_ok = pnl_at_sel/TOTAL_CAPITAL > -0.30
 s3.metric("DRAWDOWN TOLERANCE (20-30%)", "WITHIN" if dd_ok else "BREACHED")
 
 fig_st = go.Figure()
-fig_st.add_scatter(x=shocks*100, y=curve, mode="lines", name="P&L AT EXPIRY",
+fig_st.add_scatter(x=shocks*100, y=curve, mode="lines", name="P&L",
                    line=dict(color="#00c8ff", width=2))
 fig_st.add_hline(y=0, line_color="#444444", line_width=1)
 fig_st.add_hline(y=-0.20*TOTAL_CAPITAL, line_color="#ff9900", line_dash="dot",
@@ -390,7 +441,7 @@ fig_st.update_layout(
     font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
     margin=dict(l=40, r=20, t=20, b=40), height=380, showlegend=False,
     xaxis=dict(title="BASKET MOVE %", gridcolor="#1e1e1e", ticksuffix="%"),
-    yaxis=dict(title="P&L AT EXPIRY", gridcolor="#1e1e1e", tickprefix="$"))
+    yaxis=dict(title=f"P&L ({stress_mode})", gridcolor="#1e1e1e", tickprefix="$"))
 st.plotly_chart(fig_st, use_container_width=True)
 
 st.markdown("---")
@@ -463,6 +514,23 @@ checks = [
      f"${abs(total_ddelta):,.0f}  vs  ${MAX_DELTA_TOTAL:,.0f} limit",
      abs(total_ddelta), MAX_DELTA_TOTAL),
 ]
+
+# Stock inventory ceiling (manual §8.3: keep assigned/held stock under ~40%
+# so the program stays a put-selling engine). Long Stock at market value +
+# covered-call stock legs (100 sh per contract).
+stock_val = 0.0
+for _, r in book.iterrows():
+    spot_r = r["SPOT"]
+    if spot_r is None or (isinstance(spot_r, float) and np.isnan(spot_r)):
+        continue
+    if r["_IS_STOCK"]:
+        stock_val += spot_r * r["CONTRACTS"]
+    elif r["_IS_CC"]:
+        stock_val += spot_r * 100 * r["CONTRACTS"]
+stock_pct = stock_val / TOTAL_CAPITAL if TOTAL_CAPITAL else 0
+checks.append(("STOCK INVENTORY", stock_pct <= MAX_STOCK_INV,
+               f"${stock_val:,.0f} = {stock_pct:.1%}  vs  {MAX_STOCK_INV:.0%} ceiling",
+               stock_pct, MAX_STOCK_INV))
 
 # Per-trade cap (manual: <=2-3% of capital per single trade)
 trade_breaches = book[book["CASH AT RISK"] > MAX_PER_TRADE * TOTAL_CAPITAL]

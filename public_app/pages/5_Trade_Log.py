@@ -67,14 +67,21 @@ st.markdown("---")
 
 # ── Strategy definitions (drives auto-calc logic) ─────────────────────────────
 STRATEGIES = {
-    "Short Put":                  {"legs":"single","type":"put", "short":True},
-    "Cash-Secured Put (Wheel)":   {"legs":"single","type":"put", "short":True},
-    "Bull Put Spread":            {"legs":"spread","type":"put", "short":True},
-    "Covered Call":               {"legs":"single","type":"call","short":True},
-    "Bear Call Spread":           {"legs":"spread","type":"call","short":True},
-    "Long Put (Hedge)":           {"legs":"single","type":"put", "short":False},
-    "Long Call":                  {"legs":"single","type":"call","short":False},
+    "Short Put":                  {"legs":"single","type":"put",  "short":True},
+    "Cash-Secured Put (Wheel)":   {"legs":"single","type":"put",  "short":True},
+    "Bull Put Spread":            {"legs":"spread","type":"put",  "short":True},
+    "Covered Call":               {"legs":"single","type":"call", "short":True},
+    "Bear Call Spread":           {"legs":"spread","type":"call", "short":True},
+    "Long Put (Hedge)":           {"legs":"single","type":"put",  "short":False},
+    "Long Call":                  {"legs":"single","type":"call", "short":False},
+    # Stock positions: CONTRACTS = SHARES, PREMIUM / CREDIT = entry price/share,
+    # no expiry, multiplier 1 (not 100)
+    "Long Stock":                 {"legs":"stock", "type":"stock","short":False},
 }
+
+def strat_mult(strategy: str) -> int:
+    """P&L multiplier: 1 for stock (per share), 100 for option contracts."""
+    return 1 if STRATEGIES.get(str(strategy), {}).get("legs") == "stock" else 100
 
 STRAT_NAMES = list(STRATEGIES.keys())
 
@@ -88,24 +95,32 @@ cc1, cc2, cc3, cc4 = st.columns(4)
 nt_date     = cc1.date_input("DATE OPENED", datetime.date.today(), key="nt_date")
 nt_ticker   = cc2.text_input("TICKER", key="nt_ticker").upper().strip()
 nt_strategy = cc3.selectbox("STRATEGY", STRAT_NAMES, key="nt_strategy")
-nt_contracts= cc4.number_input("CONTRACTS", min_value=1, value=1, key="nt_contracts")
+strat_def   = STRATEGIES[nt_strategy]
+is_spread   = strat_def["legs"] == "spread"
+is_stock    = strat_def["legs"] == "stock"
+nt_contracts= cc4.number_input("SHARES" if is_stock else "CONTRACTS",
+                               min_value=1, value=100 if is_stock else 1, key="nt_contracts")
 
 sc1, sc2, sc3 = st.columns(3)
-strat_def = STRATEGIES[nt_strategy]
-is_spread = strat_def["legs"] == "spread"
-
-nt_short_strike = sc1.number_input("SHORT STRIKE (sell leg)", min_value=0.0, step=0.50, key="nt_short_strike")
+nt_short_strike = sc1.number_input(
+    "SHORT STRIKE (sell leg)" + (" — N/A FOR STOCK" if is_stock else ""),
+    min_value=0.0, step=0.50, key="nt_short_strike", disabled=is_stock)
 nt_long_strike  = sc2.number_input(
     "LONG STRIKE (buy leg)" + (" — SPREADS ONLY" if is_spread else " — not needed"),
     min_value=0.0, step=0.50, key="nt_long_strike",
     disabled=not is_spread,
     help="Only for spreads — the strike you buy as protection"
 )
-nt_expiry = sc3.date_input("EXPIRY DATE", datetime.date.today() + datetime.timedelta(days=35), key="nt_expiry")
+nt_expiry = sc3.date_input("EXPIRY DATE" + (" — N/A FOR STOCK" if is_stock else ""),
+                           datetime.date.today() + datetime.timedelta(days=35),
+                           key="nt_expiry", disabled=is_stock)
 
 pc1, pc1b, pc2 = st.columns(3)
-nt_premium = pc1.number_input("PREMIUM / NET CREDIT (per share)", min_value=0.0, step=0.01, key="nt_premium",
-                               help="For short options: credit received per share. For spreads: net credit = sell leg − buy leg.")
+nt_premium = pc1.number_input(
+    "ENTRY PRICE PER SHARE" if is_stock else "PREMIUM / NET CREDIT (per share)",
+    min_value=0.0, step=0.01, key="nt_premium",
+    help="Stock: your purchase price per share." if is_stock else
+         "For short options: credit received per share. For spreads: net credit = sell leg − buy leg.")
 # Manual: log the Alpha Trend signal that triggered every trade (daily chart)
 nt_signal  = pc1b.selectbox("ALPHA TREND SIGNAL (DAILY)", [
     "MACRO GREEN + STRENGTH",
@@ -119,9 +134,16 @@ nt_signal  = pc1b.selectbox("ALPHA TREND SIGNAL (DAILY)", [
 nt_notes   = pc2.text_input("NOTES", key="nt_notes")
 
 # Auto-calculations
-nt_dte = max((nt_expiry - datetime.date.today()).days, 0)
+nt_dte = None if is_stock else max((nt_expiry - datetime.date.today()).days, 0)
 
-if strat_def["type"] == "put" and strat_def["short"] and not is_spread:
+if is_stock:
+    # Long stock: cost basis = price x shares; worst case stock -> $0
+    nt_cash_secured = nt_premium * nt_contracts
+    nt_max_loss = nt_cash_secured
+    cash_note = f"Entry ${nt_premium:.2f} × {nt_contracts} shares = ${nt_cash_secured:,.0f}"
+    loss_note = f"Stock → $0 = ${nt_max_loss:,.0f}"
+
+elif strat_def["type"] == "put" and strat_def["short"] and not is_spread:
     # Short Put / Wheel: cash secured = strike × 100 × contracts
     nt_cash_secured = nt_short_strike * 100 * nt_contracts
     nt_max_loss = nt_cash_secured  # worst case: stock to zero
@@ -151,11 +173,15 @@ else:
 
 # Preview calculated values
 pc3, pc4, pc5, pc6 = st.columns(4)
-pc3.metric("DTE (AUTO)", nt_dte, help="Expiry date − today")
-pc4.metric("CASH SECURED (AUTO)", f"${nt_cash_secured:,.0f}", help=cash_note)
+pc3.metric("DTE (AUTO)", "—" if nt_dte is None else nt_dte, help="Expiry date − today (N/A for stock)")
+pc4.metric("CASH DEPLOYED (AUTO)", f"${nt_cash_secured:,.0f}", help=cash_note)
 pc5.metric("MAX LOSS (AUTO)", f"${nt_max_loss:,.0f}", help=loss_note)
-pc6.metric("TOTAL CREDIT ($)", f"${nt_premium*100*nt_contracts:,.0f}",
-           help="Premium per share × 100 × contracts")
+if is_stock:
+    pc6.metric("COST BASIS ($)", f"${nt_premium*nt_contracts:,.0f}",
+               help="Entry price × shares")
+else:
+    pc6.metric("TOTAL CREDIT ($)", f"${nt_premium*100*nt_contracts:,.0f}",
+               help="Premium per share × 100 × contracts")
 
 if st.button("ADD TRADE", type="primary", use_container_width=False):
     if not nt_ticker:
@@ -172,9 +198,9 @@ if st.button("ADD TRADE", type="primary", use_container_width=False):
             "DATE OPENED":      nt_date.isoformat(),
             "TICKER":           nt_ticker,
             "STRATEGY":         nt_strategy,
-            "SHORT STRIKE":     nt_short_strike if nt_short_strike > 0 else None,
+            "SHORT STRIKE":     nt_short_strike if nt_short_strike > 0 and not is_stock else None,
             "LONG STRIKE":      nt_long_strike  if is_spread and nt_long_strike > 0 else None,
-            "EXPIRY":           nt_expiry.isoformat(),
+            "EXPIRY":           None if is_stock else nt_expiry.isoformat(),
             "DTE OPEN":         nt_dte,
             "CONTRACTS":        nt_contracts,
             "PREMIUM / CREDIT": nt_premium,
@@ -188,7 +214,10 @@ if st.button("ADD TRADE", type="primary", use_container_width=False):
             "NOTES":            nt_notes,
         }
         db.save_trades_df(pd.concat([trades, pd.DataFrame([new_row])], ignore_index=True))
-        st.success(f"Added: {nt_strategy} on {nt_ticker} | Strike ${nt_short_strike:.2f} | Expiry {nt_expiry} | Credit ${nt_premium*100*nt_contracts:,.0f}")
+        if is_stock:
+            st.success(f"Added: {nt_strategy} on {nt_ticker} | {nt_contracts} shares @ ${nt_premium:.2f} | Cost ${nt_premium*nt_contracts:,.0f}")
+        else:
+            st.success(f"Added: {nt_strategy} on {nt_ticker} | Strike ${nt_short_strike:.2f} | Expiry {nt_expiry} | Credit ${nt_premium*100*nt_contracts:,.0f}")
         st.rerun()
 
 # ── Close a trade ─────────────────────────────────────────────────────────────
@@ -221,7 +250,8 @@ if not open_trades.empty:
         prem_orig  = float(row["PREMIUM / CREDIT"] or 0)
         ctrs       = int(row["CONTRACTS"])
         is_short   = STRATEGIES.get(str(row["STRATEGY"]), {}).get("short", True)
-        realized   = (prem_orig - close_price) * 100 * ctrs if is_short else (close_price - prem_orig) * 100 * ctrs
+        mult       = strat_mult(row["STRATEGY"])
+        realized   = (prem_orig - close_price) * mult * ctrs if is_short else (close_price - prem_orig) * mult * ctrs
         max_l      = float(row["MAX LOSS"]) if pd.notna(row["MAX LOSS"]) and row["MAX LOSS"] else 0
         return_pct = realized / max_l if max_l else 0
 
@@ -232,7 +262,8 @@ if not open_trades.empty:
         prem_orig  = float(row["PREMIUM / CREDIT"] or 0)
         ctrs       = int(row["CONTRACTS"])
         is_short   = STRATEGIES.get(str(row["STRATEGY"]), {}).get("short", True)
-        realized   = (prem_orig - close_price) * 100 * ctrs if is_short else (close_price - prem_orig) * 100 * ctrs
+        mult       = strat_mult(row["STRATEGY"])
+        realized   = (prem_orig - close_price) * mult * ctrs if is_short else (close_price - prem_orig) * mult * ctrs
         idx = trades[trades["ID"] == close_id].index[0]
         trades.at[idx, "STATUS"]      = close_status
         trades.at[idx, "DATE CLOSED"] = close_date.isoformat()
@@ -252,8 +283,10 @@ if not trades.empty:
     open_ct    = (trades["STATUS"] == "OPEN").sum()
     closed_ct  = (trades["STATUS"] != "OPEN").sum()
     total_pnl  = pd.to_numeric(trades["REALIZED PNL"], errors="coerce").sum()
-    total_cred = (pd.to_numeric(trades["PREMIUM / CREDIT"], errors="coerce") *
-                  pd.to_numeric(trades["CONTRACTS"], errors="coerce")).sum() * 100
+    # Option credits only — for Long Stock the premium column is an entry price
+    opt_rows   = trades[trades["STRATEGY"] != "Long Stock"]
+    total_cred = (pd.to_numeric(opt_rows["PREMIUM / CREDIT"], errors="coerce") *
+                  pd.to_numeric(opt_rows["CONTRACTS"], errors="coerce")).sum() * 100
 
     k1,k2,k3,k4 = st.columns(4)
     k1.metric("OPEN",           open_ct)

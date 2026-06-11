@@ -103,6 +103,21 @@ def bs_put_delta(spot, strike, iv, dte, rf=0.053):
 def bs_call_delta(spot, strike, iv, dte, rf=0.053):
     return _bs_delta(spot, strike, iv, dte, rf, "call")
 
+def bs_price(spot, strike, iv, dte, rf=0.053, kind="put"):
+    """Black-Scholes European option price (scalar).
+    Falls back to intrinsic value when expired or IV is unusable."""
+    if spot <= 0 or strike <= 0:
+        return float("nan")
+    if dte <= 0 or iv <= 0:
+        return max(strike - spot, 0) if kind == "put" else max(spot - strike, 0)
+    T  = dte / 365.0
+    sq = iv * np.sqrt(T)
+    d1 = (np.log(spot / strike) + (rf + 0.5 * iv * iv) * T) / sq
+    d2 = d1 - sq
+    if kind == "put":
+        return float(strike * np.exp(-rf * T) * norm.cdf(-d2) - spot * norm.cdf(-d1))
+    return float(spot * norm.cdf(d1) - strike * np.exp(-rf * T) * norm.cdf(d2))
+
 def moneyness(spot, strike, is_put=True):
     b = 0.01 * spot
     if is_put:
