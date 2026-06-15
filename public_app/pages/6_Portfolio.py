@@ -267,14 +267,20 @@ pct_deployed   = total_cash / TOTAL_CAPITAL if TOTAL_CAPITAL else 0
 cash_buffer    = 1 - pct_deployed
 total_ddelta   = pd.to_numeric(book["$ DELTA"],    errors="coerce").sum()
 total_unreal   = pd.to_numeric(book["UNREAL PNL"], errors="coerce").sum()
+# Premium received on open short-option positions (excludes long legs & stock)
+short_opt      = book[(~book["_IS_STOCK"]) & (book["_IS_SHORT"])]
+total_premium  = (pd.to_numeric(short_opt["PREM RECEIVED"], errors="coerce") *
+                  pd.to_numeric(short_opt["CONTRACTS"], errors="coerce") * 100).sum()
 
-k1, k2, k3, k4, k5 = st.columns(5)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric("OPEN POSITIONS",       len(book))
 k2.metric("CAPITAL DEPLOYED",     f"${total_cash:,.0f}",    f"{pct_deployed:.1%}")
-k3.metric("TOTAL MAX LOSS",       f"${total_max_loss:,.0f}")
-k4.metric("NET $ DELTA",          f"${total_ddelta:,.0f}",
-          help="Σ delta × contracts × 100 × spot  |  +ve = net bullish")
-k5.metric("UNREAL PNL (MID)",     f"${total_unreal:,.0f}",
+k3.metric("PREMIUM RECEIVED",     f"${total_premium:,.0f}",
+          help="Σ premium × 100 × contracts on open short options (credit collected up front)")
+k4.metric("TOTAL MAX LOSS",       f"${total_max_loss:,.0f}")
+k5.metric("NET $ DELTA",          f"${total_ddelta:,.0f}",
+          help="Σ delta × contracts × multiplier × spot  |  +ve = net bullish")
+k6.metric("UNREAL PNL (MID)",     f"${total_unreal:,.0f}",
           help="(Premium received − current mid) × 100 × contracts")
 
 st.caption("CAPITAL DEPLOYED: cash-secured puts use strike×100; spreads use their max loss (defined risk); "
