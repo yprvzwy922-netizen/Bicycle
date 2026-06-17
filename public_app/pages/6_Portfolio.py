@@ -32,9 +32,16 @@ st.caption("OPEN POSITIONS FROM TRADE LOG | DELTA EXPOSURE | SECTOR LIMITS | RIS
 
 # ── Risk limits (sidebar) ─────────────────────────────────────────────────────
 with st.sidebar:
+    st.markdown("### CAPITAL BASE")
+    CAP_MODE = st.radio("RISK CAPS MEASURED AGAINST",
+                        ["Auto — Fund NAV", "Manual"], index=0,
+                        help="Auto = fund's contributions + realized + unrealized P&L "
+                             "(the real money). Manual = a fixed number you type.")
+    MANUAL_CAPITAL = st.number_input("MANUAL CAPITAL ($)", 10_000, 10_000_000, 1_000_000, 5_000,
+                                     disabled=CAP_MODE.startswith("Auto"))
+    st.markdown("---")
     st.markdown("### RISK LIMITS")
     st.caption("DEFAULTS = PUT-SELLING PROSPECT CAPS (OPS STEP 6)")
-    TOTAL_CAPITAL   = st.number_input("TOTAL CAPITAL ($)", 10_000, 10_000_000, 1_000_000, 5_000)
     MAX_SINGLE_NAME = st.slider("MAX SINGLE NAME %",      5,  30, 10) / 100   # <=10% per name
     MAX_PER_TRADE   = st.slider("MAX SINGLE TRADE %",     1,  10,  3) / 100   # <=2-3% per trade
     MAX_SPECULATIVE = st.slider("MAX SPECULATIVE %",     10,  50, 40) / 100   # <=40% spec bucket
@@ -271,29 +278,48 @@ for _, t in open_trades.iterrows():
 
 book = pd.DataFrame(rows)
 
+# ── Capital base = the actual fund (contributions + realized + unrealized) ─────
+total_unreal   = pd.to_numeric(book["UNREAL PNL"], errors="coerce").sum()
+realized_all   = pd.to_numeric(trades["REALIZED PNL"], errors="coerce").fillna(0).sum()
+contribs       = db.load_contributions()
+contributed    = float(pd.to_numeric(contribs["amount"], errors="coerce").sum()) if not contribs.empty else 0.0
+fund_nav       = contributed + realized_all + total_unreal
+
+if CAP_MODE.startswith("Auto") and contributed > 0:
+    TOTAL_CAPITAL = fund_nav
+    cap_note = (f"AUTO = FUND NAV  →  contributed ${contributed:,.0f} + realized ${realized_all:,.0f} "
+                f"+ unrealized ${total_unreal:,.0f} = ${fund_nav:,.0f}")
+else:
+    TOTAL_CAPITAL = MANUAL_CAPITAL
+    cap_note = (f"MANUAL = ${MANUAL_CAPITAL:,.0f}"
+                + ("  (no contributions logged yet — add them on the Fund page to use Auto)"
+                   if CAP_MODE.startswith("Auto") else ""))
+
 # ── Portfolio KPIs ────────────────────────────────────────────────────────────
 total_cash     = book["CASH AT RISK"].sum()
 total_max_loss = book["MAX LOSS"].sum()
 pct_deployed   = total_cash / TOTAL_CAPITAL if TOTAL_CAPITAL else 0
 cash_buffer    = 1 - pct_deployed
 total_ddelta   = pd.to_numeric(book["$ DELTA"],    errors="coerce").sum()
-total_unreal   = pd.to_numeric(book["UNREAL PNL"], errors="coerce").sum()
 # Premium received on open short-option positions (excludes long legs & stock)
 short_opt      = book[(~book["_IS_STOCK"]) & (book["_IS_SHORT"])]
 total_premium  = (pd.to_numeric(short_opt["PREM RECEIVED"], errors="coerce") *
                   pd.to_numeric(short_opt["CONTRACTS"], errors="coerce") * 100).sum()
 
-k1, k2, k3, k4, k5, k6 = st.columns(6)
-k1.metric("OPEN POSITIONS",       len(book))
-k2.metric("CAPITAL DEPLOYED",     f"${total_cash:,.0f}",    f"{pct_deployed:.1%}")
-k3.metric("PREMIUM RECEIVED",     f"${total_premium:,.0f}",
+k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
+k1.metric("TOTAL CAPITAL",        f"${TOTAL_CAPITAL:,.0f}",
+          help="The base all risk caps are measured against. " + cap_note)
+k2.metric("OPEN POSITIONS",       len(book))
+k3.metric("CAPITAL DEPLOYED",     f"${total_cash:,.0f}",    f"{pct_deployed:.1%}")
+k4.metric("PREMIUM RECEIVED",     f"${total_premium:,.0f}",
           help="Σ premium × 100 × contracts on open short options (credit collected up front)")
-k4.metric("TOTAL MAX LOSS",       f"${total_max_loss:,.0f}")
-k5.metric("NET $ DELTA",          f"${total_ddelta:,.0f}",
+k5.metric("TOTAL MAX LOSS",       f"${total_max_loss:,.0f}")
+k6.metric("NET $ DELTA",          f"${total_ddelta:,.0f}",
           help="Σ delta × contracts × multiplier × spot  |  +ve = net bullish")
-k6.metric("UNREAL PNL (MID)",     f"${total_unreal:,.0f}",
+k7.metric("UNREAL PNL (MID)",     f"${total_unreal:,.0f}",
           help="(Premium received − current mid) × 100 × contracts")
 
+st.caption(f"CAPITAL BASE — {cap_note}")
 st.caption("CAPITAL DEPLOYED: cash-secured puts use strike×100; spreads use their max loss (defined risk); "
            "covered calls count $0 (stock-secured, not cash) so they don't inflate deployment.")
 
