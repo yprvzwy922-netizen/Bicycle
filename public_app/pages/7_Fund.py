@@ -45,13 +45,17 @@ total_units       = float(pd.to_numeric(contribs["units_issued"], errors="coerce
 
 nav = total_contributed + realized + unreal
 nav_per_unit = (nav / total_units) if total_units > 0 else SEED_NAV_PER_UNIT
+total_pnl = realized + unreal
 
-k1, k2, k3, k4, k5 = st.columns(5)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric("FUND NAV",        f"${nav:,.0f}")
 k2.metric("CONTRIBUTED",     f"${total_contributed:,.0f}")
-k3.metric("REALIZED P&L",    f"${realized:,.0f}")
-k4.metric("UNREALIZED P&L",  f"${unreal:,.0f}")
-k5.metric("NAV / UNIT",      f"${nav_per_unit:,.2f}",
+k3.metric("TOTAL P&L ($)",   f"${total_pnl:,.0f}",
+          f"{(total_pnl/total_contributed):+.1%}" if total_contributed > 0 else None,
+          help="Realized + unrealized, in dollars (the % is on contributed capital)")
+k4.metric("REALIZED P&L",    f"${realized:,.0f}")
+k5.metric("UNREALIZED P&L",  f"${unreal:,.0f}")
+k6.metric("NAV / UNIT",      f"${nav_per_unit:,.2f}",
           f"{(nav_per_unit/SEED_NAV_PER_UNIT-1):+.1%}" if total_units > 0 else None)
 
 st.markdown("---")
@@ -89,7 +93,7 @@ with right:
 st.markdown("---")
 
 # ── Ownership table ───────────────────────────────────────────────────────────
-st.markdown("### OWNERSHIP")
+st.markdown("### OWNERSHIP — % OF FUND, VALUE & P&L PER INVESTOR")
 if contribs.empty:
     st.info("No contributions yet. Add investors and log their initial capital above.")
 else:
@@ -97,20 +101,40 @@ else:
         CONTRIBUTED=("amount", "sum"),
         UNITS=("units_issued", "sum"),
     ).reset_index().rename(columns={"investor": "INVESTOR"})
-    g["VALUE"]    = g["UNITS"] * nav_per_unit
-    g["OWNERSHIP"]= g["UNITS"] / total_units if total_units else 0
-    g["P&L"]      = g["VALUE"] - g["CONTRIBUTED"]
-    g["RETURN"]   = np.where(g["CONTRIBUTED"] > 0, g["VALUE"] / g["CONTRIBUTED"] - 1, 0)
+    g["% OF FUND"]   = g["UNITS"] / total_units if total_units else 0
+    g["VALUE"]       = g["UNITS"] * nav_per_unit
+    g["P&L ($)"]     = g["VALUE"] - g["CONTRIBUTED"]   # dollar gain (timing-weighted)
+    g["RETURN %"]    = np.where(g["CONTRIBUTED"] > 0, g["VALUE"] / g["CONTRIBUTED"] - 1, 0)
+    g = g.sort_values("% OF FUND", ascending=False)
+
+    # Column order: investor, % of fund, then dollar figures
+    g = g[["INVESTOR", "% OF FUND", "CONTRIBUTED", "VALUE", "P&L ($)", "RETURN %", "UNITS"]]
+
+    # TOTAL row
+    tot = pd.DataFrame([{
+        "INVESTOR": "TOTAL", "% OF FUND": g["% OF FUND"].sum(),
+        "CONTRIBUTED": g["CONTRIBUTED"].sum(), "VALUE": g["VALUE"].sum(),
+        "P&L ($)": g["P&L ($)"].sum(), "RETURN %": (g["VALUE"].sum()/g["CONTRIBUTED"].sum()-1)
+                    if g["CONTRIBUTED"].sum() > 0 else 0,
+        "UNITS": g["UNITS"].sum(),
+    }])
+    g = pd.concat([g, tot], ignore_index=True)
 
     def color_pnl(v):
         try: return "color:#00e676" if float(v) > 0 else "color:#ff4444" if float(v) < 0 else ""
         except: return ""
+    def bold_total(row):
+        return ["font-weight:700;border-top:1px solid #00c8ff" if row["INVESTOR"] == "TOTAL" else "" for _ in row]
 
     st.dataframe(
-        g.style.map(color_pnl, subset=["P&L", "RETURN"]).format({
-            "CONTRIBUTED": "${:,.0f}", "UNITS": "{:,.2f}", "VALUE": "${:,.0f}",
-            "OWNERSHIP": "{:.1%}", "P&L": "${:,.0f}", "RETURN": "{:+.1%}",
+        g.style.map(color_pnl, subset=["P&L ($)", "RETURN %"])
+               .apply(bold_total, axis=1)
+               .format({
+            "% OF FUND": "{:.1%}", "CONTRIBUTED": "${:,.0f}", "VALUE": "${:,.0f}",
+            "P&L ($)": "${:,.0f}", "RETURN %": "{:+.1%}", "UNITS": "{:,.2f}",
         }), use_container_width=True, hide_index=True)
+    st.caption("% OF FUND = your units ÷ total units. P&L ($) = current value − what you put in "
+               "(timing-weighted via unit accounting). RETURN % = P&L ÷ your contributions.")
 
     with st.expander("ALL CONTRIBUTIONS"):
         st.dataframe(
