@@ -427,6 +427,12 @@ def book_pnl_at(shock: float, mode: str) -> float:
             v = bs_price(s, k, r["_IV"], r["_DTE_REM"], kind=kind)
             if r["_IS_SPREAD"] and kl:
                 v -= bs_price(s, kl, r["_IV"], r["_DTE_REM"], kind=kind)
+            # Anchor to the live mark: shift the BS curve so 0% shock reprices
+            # to the actual current mid (removes BS-vs-market model gap). Single
+            # options only — spreads don't store a long-leg mark.
+            cm = r["CURRENT MID"]
+            if not r["_IS_SPREAD"] and cm is not None and not (isinstance(cm, float) and np.isnan(cm)):
+                v += cm - bs_price(spot_r, k, r["_IV"], r["_DTE_REM"], kind=kind)
         else:  # HOLD TO EXPIRY -> intrinsic
             v = max(k - s, 0) if r["_IS_PUT"] else max(s - k, 0)
             if r["_IS_SPREAD"] and kl:
