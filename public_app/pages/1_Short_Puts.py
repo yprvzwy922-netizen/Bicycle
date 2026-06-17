@@ -31,14 +31,15 @@ st.caption("STRATEGY: SELL CASH-SECURED PUT | TARGET: OTM STRIKE NEAR DELTA BAND
 # ── Sidebar filters ───────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### FILTERS")
+    st.caption("DEFAULTS SHOW EVERY NAME — TIGHTEN FROM HERE")
     f_trend    = st.checkbox("TREND UP ONLY", False)
-    f_earn     = st.checkbox("NO EARNINGS INSIDE DTE WINDOW", True)
-    f_min_yld  = st.number_input("MIN 1M ANN YIELD (%)", min_value=0, max_value=200, value=10, step=5)
+    f_earn     = st.checkbox("NO EARNINGS INSIDE DTE WINDOW", False)
+    f_min_yld  = st.number_input("MIN 1M ANN YIELD (%)", min_value=0, max_value=200, value=0, step=5)
     f_min_yld  = f_min_yld / 100
-    f_max_delt = st.slider("MAX 1M DELTA", 0.10, 0.60, 0.45, 0.01)
-    f_min_oi   = st.number_input("MIN OPEN INTEREST", min_value=0, value=100, step=100)
-    f_max_sp   = st.slider("MAX BID/ASK SPREAD %", 0.01, 0.50, 0.20, 0.01)
-    f_min_cush = st.slider("MIN DOWNSIDE CUSHION %", 0.0, 0.20, 0.02, 0.005, format="%.1f%%")
+    f_max_delt = st.slider("MAX 1M DELTA", 0.10, 0.60, 0.60, 0.01)
+    f_min_oi   = st.number_input("MIN OPEN INTEREST", min_value=0, value=0, step=100)
+    f_max_sp   = st.slider("MAX BID/ASK SPREAD %", 0.01, 0.50, 0.50, 0.01)
+    f_min_cush = st.slider("MIN DOWNSIDE CUSHION %", 0.0, 0.20, 0.0, 0.005, format="%.1f%%")
     f_buckets  = st.multiselect("BUCKET", ["Core","Growth","Speculative"], default=[])
     f_sectors  = st.multiselect("SECTOR", SECTORS, default=[])
     f_verdict  = st.selectbox("MIN VERDICT", ["PASS","WATCH","TRADE"], index=0)
