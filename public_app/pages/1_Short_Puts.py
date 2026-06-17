@@ -141,15 +141,19 @@ if f_sectors:  df = df[df["SECTOR"].isin(f_sectors)]
 if f_verdict != "PASS": df = df[df["VERDICT"].map(v_ord).fillna(0) >= v_ord[f_verdict]]
 
 # ── KPI row ───────────────────────────────────────────────────────────────────
-trade_ct = (df["VERDICT"] == "TRADE").sum()
-watch_ct = (df["VERDICT"] == "WATCH").sum()
-avg_yld  = df["1M ANN YLD"].mean()
+trade_ct  = (df["VERDICT"] == "TRADE").sum()
+watch_ct  = (df["VERDICT"] == "WATCH").sum()
+avg_yld   = df["1M ANN YLD"].mean()
+avg_yld_t = df.loc[df["VERDICT"] == "TRADE", "1M ANN YLD"].mean()
 
-k1,k2,k3,k4 = st.columns(4)
+k1,k2,k3,k4,k5 = st.columns(5)
 k1.metric("TICKERS SHOWN",   len(df))
 k2.metric("TRADE VERDICTS",  trade_ct)
 k3.metric("WATCH VERDICTS",  watch_ct)
-k4.metric("AVG 1M ANN YIELD", f"{avg_yld:.1%}" if not np.isnan(avg_yld) else "—")
+k4.metric("AVG ANN YIELD (SHOWN)", f"{avg_yld:.1%}" if not np.isnan(avg_yld) else "—",
+          help="Average across every name currently shown (after filters)")
+k5.metric("AVG ANN YIELD (TRADE)", f"{avg_yld_t:.1%}" if not np.isnan(avg_yld_t) else "—",
+          help="Average across only the TRADE-verdict names")
 
 st.markdown("---")
 
