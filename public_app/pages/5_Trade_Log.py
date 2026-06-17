@@ -245,32 +245,78 @@ if not open_trades.empty:
                                    help="For short options: premium to buy back. 0 if expired worthless.")
     close_date  = cx4.date_input("DATE CLOSED", datetime.date.today(), key="close_date")
 
+    # Strategy facts used by both preview and the close action
+    def _close_facts(row):
+        strat    = str(row["STRATEGY"])
+        sdef     = STRATEGIES.get(strat, {})
+        is_short = sdef.get("short", True)
+        mult     = strat_mult(strat)
+        prem     = float(row["PREMIUM / CREDIT"] or 0)
+        ctrs     = int(row["CONTRACTS"])
+        strike   = float(row["SHORT STRIKE"]) if pd.notna(row["SHORT STRIKE"]) else 0.0
+        assigned = close_status == "ASSIGNED / EXERCISED"
+        # Single-leg short put assigned -> you are put the shares at the strike
+        put_assigned = (assigned and is_short and sdef.get("type") == "put"
+                        and sdef.get("legs") == "single")
+        cc_assigned  = assigned and strat == "Covered Call"
+        # On assignment the option premium is kept in full (no buyback)
+        if assigned and is_short:
+            realized = prem * mult * ctrs
+        elif is_short:
+            realized = (prem - close_price) * mult * ctrs
+        else:
+            realized = (close_price - prem) * mult * ctrs
+        return dict(strat=strat, is_short=is_short, mult=mult, prem=prem, ctrs=ctrs,
+                    strike=strike, put_assigned=put_assigned, cc_assigned=cc_assigned,
+                    realized=realized)
+
     if close_id:
         row = trades[trades["ID"] == close_id].iloc[0]
-        prem_orig  = float(row["PREMIUM / CREDIT"] or 0)
-        ctrs       = int(row["CONTRACTS"])
-        is_short   = STRATEGIES.get(str(row["STRATEGY"]), {}).get("short", True)
-        mult       = strat_mult(row["STRATEGY"])
-        realized   = (prem_orig - close_price) * mult * ctrs if is_short else (close_price - prem_orig) * mult * ctrs
+        f   = _close_facts(row)
         max_l      = float(row["MAX LOSS"]) if pd.notna(row["MAX LOSS"]) and row["MAX LOSS"] else 0
-        return_pct = realized / max_l if max_l else 0
-
-        st.info(f"REALIZED P&L: **${realized:,.2f}**  |  Return on capital: **{return_pct:.1%}**")
+        return_pct = f["realized"] / max_l if max_l else 0
+        st.info(f"REALIZED P&L: **${f['realized']:,.2f}**  |  Return on capital: **{return_pct:.1%}**")
+        if f["put_assigned"] and f["strike"] > 0:
+            eff = f["strike"] - f["prem"]
+            st.warning(f"ASSIGNMENT → will create LONG STOCK: **{f['ctrs']*100} shares of "
+                       f"{row['TICKER']} @ ${f['strike']:.2f}** (effective basis ${eff:.2f} after premium). "
+                       f"Next step per manual: sell covered calls.")
+        elif f["cc_assigned"]:
+            st.warning("COVERED CALL ASSIGNED → your shares are CALLED AWAY. "
+                       "Close/trim the matching LONG STOCK position manually in the table below.")
 
     if st.button("CLOSE TRADE", type="primary"):
         row = trades[trades["ID"] == close_id].iloc[0]
-        prem_orig  = float(row["PREMIUM / CREDIT"] or 0)
-        ctrs       = int(row["CONTRACTS"])
-        is_short   = STRATEGIES.get(str(row["STRATEGY"]), {}).get("short", True)
-        mult       = strat_mult(row["STRATEGY"])
-        realized   = (prem_orig - close_price) * mult * ctrs if is_short else (close_price - prem_orig) * mult * ctrs
+        f   = _close_facts(row)
         idx = trades[trades["ID"] == close_id].index[0]
         trades.at[idx, "STATUS"]      = close_status
         trades.at[idx, "DATE CLOSED"] = close_date.isoformat()
         trades.at[idx, "CLOSE PRICE"] = close_price
-        trades.at[idx, "REALIZED PNL"]= round(realized, 2)
-        db.save_trades_df(trades)
-        st.success(f"Trade #{close_id} closed. P&L: ${realized:,.2f}")
+        trades.at[idx, "REALIZED PNL"]= round(f["realized"], 2)
+
+        new_frame = trades
+        msg = f"Trade #{close_id} closed. P&L: ${f['realized']:,.2f}"
+
+        # Short put assigned -> auto-create the Long Stock leg of the wheel
+        if f["put_assigned"] and f["strike"] > 0:
+            ids = pd.to_numeric(trades["ID"], errors="coerce").dropna()
+            stock_id = int(ids.max()) + 1 if not ids.empty else 1
+            shares   = f["ctrs"] * 100
+            stock_row = {c: None for c in COLUMNS}
+            stock_row.update({
+                "ID": stock_id, "DATE OPENED": close_date.isoformat(),
+                "TICKER": row["TICKER"], "STRATEGY": "Long Stock",
+                "CONTRACTS": shares, "PREMIUM / CREDIT": f["strike"],
+                "CASH SECURED": round(f["strike"] * shares, 2),
+                "MAX LOSS": round(f["strike"] * shares, 2),
+                "STATUS": "OPEN", "SIGNAL": row.get("SIGNAL"),
+                "NOTES": f"Assigned from put #{close_id} @ ${f['strike']:.2f}",
+            })
+            new_frame = pd.concat([trades, pd.DataFrame([stock_row])], ignore_index=True)
+            msg += f"  →  Created LONG STOCK: {shares} sh {row['TICKER']} @ ${f['strike']:.2f}"
+
+        db.save_trades_df(new_frame)
+        st.success(msg)
         st.rerun()
 else:
     st.caption("No open trades.")
