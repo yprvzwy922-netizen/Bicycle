@@ -78,3 +78,15 @@ create table if not exists fund_snapshots (
   realized_pnl  double precision,
   unreal_pnl    double precision
 );
+
+-- ── Disable Row-Level Security ────────────────────────────────────────────────
+-- Supabase enables RLS by default, which blocks the anon key from reading/
+-- writing. The only client is our password-protected app and the key lives in
+-- Streamlit secrets, so we turn RLS off for full anon access.
+alter table trades              disable row level security;
+alter table watchlist           disable row level security;
+alter table snapshots           disable row level security;
+alter table portfolio_snapshots disable row level security;
+alter table investors           disable row level security;
+alter table contributions       disable row level security;
+alter table fund_snapshots      disable row level security;
