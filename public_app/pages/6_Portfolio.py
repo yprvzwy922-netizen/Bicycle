@@ -424,9 +424,9 @@ def book_pnl_at(shock: float, mode: str) -> float:
         total += pnl * 100 * ctrs
     return total
 
-shocks     = np.arange(-0.60, 0.61, 0.05)
+shocks     = np.arange(-0.60, 0.605, 0.01)
 curve      = [book_pnl_at(s, stress_mode) for s in shocks]
-sel_shock  = st.slider("BASKET SHOCK %", -60, 60, -20, 5) / 100
+sel_shock  = st.slider("BASKET SHOCK %", -60, 60, -20, 1) / 100
 pnl_at_sel = book_pnl_at(sel_shock, stress_mode)
 
 s1, s2, s3 = st.columns(3)
