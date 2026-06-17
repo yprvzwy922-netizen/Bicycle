@@ -558,6 +558,20 @@ checks.append(("STOCK INVENTORY", stock_pct <= MAX_STOCK_INV,
                f"${stock_val:,.0f} = {stock_pct:.1%}  vs  {MAX_STOCK_INV:.0%} ceiling",
                stock_pct, MAX_STOCK_INV))
 
+# Calls backed by stock (no naked calls): each ticker's covered-call contracts
+# need 100 shares apiece in a Long Stock row. Bear call spreads are excluded —
+# they're backed by their long call, not stock.
+shares_by_tkr = book[book["_IS_STOCK"]].groupby("TICKER")["CONTRACTS"].sum()
+naked = []
+for tkr, grp in book[book["_IS_CC"]].groupby("TICKER"):
+    need = float(grp["CONTRACTS"].sum()) * 100      # shares required
+    have = float(shares_by_tkr.get(tkr, 0))         # shares held
+    if need > have + 1e-6:
+        naked.append(f"{tkr}: {int(grp['CONTRACTS'].sum())} call(s) need {int(need)} sh, have {int(have)} ({int(need-have)} uncovered)")
+checks.append(("CALLS BACKED BY STOCK", len(naked) == 0,
+               "ALL COVERED" if not naked else " | ".join(naked),
+               None, None))
+
 # Per-trade cap (manual: <=2-3% of capital per single trade)
 trade_breaches = book[book["CASH AT RISK"] > MAX_PER_TRADE * TOTAL_CAPITAL]
 checks.append(("PER-TRADE CAP", trade_breaches.empty,
