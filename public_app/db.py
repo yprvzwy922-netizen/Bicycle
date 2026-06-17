@@ -53,17 +53,25 @@ def _rest(method, table, params=None, json=None, prefer=None):
         headers["Prefer"] = prefer
     r = requests.request(method, f"{url}/rest/v1/{table}",
                          headers=headers, params=params, json=json, timeout=12)
-    r.raise_for_status()
+    if not r.ok:
+        # Surface Supabase's actual message (RLS, missing column, bad key, etc.)
+        raise RuntimeError(f"{method} {table} -> HTTP {r.status_code}: {r.text[:400]}")
     return r.json() if r.text else None
 
 def _clean(records):
-    """NaN/NaT -> None so JSON serialization is valid."""
-    out = []
-    for rec in records:
-        out.append({k: (None if (v is None or (isinstance(v, float) and np.isnan(v))
-                                 or v is pd.NaT or str(v) == "nan") else v)
-                    for k, v in rec.items()})
-    return out
+    """Make rows JSON-serializable for requests: numpy scalars -> Python natives,
+    NaN/NaT/'nan' -> None. (requests' JSON encoder can't handle numpy int64.)"""
+    def fix(v):
+        if v is None or v is pd.NaT:
+            return None
+        if isinstance(v, np.generic):          # numpy scalar -> python scalar
+            v = v.item()
+        if isinstance(v, float) and np.isnan(v):
+            return None
+        if isinstance(v, str) and v.strip().lower() == "nan":
+            return None
+        return v
+    return [{k: fix(v) for k, v in rec.items()} for rec in records]
 
 # ── Trades ────────────────────────────────────────────────────────────────────
 def load_trades() -> pd.DataFrame:
