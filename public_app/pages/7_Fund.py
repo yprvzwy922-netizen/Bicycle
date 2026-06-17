@@ -1,0 +1,142 @@
+"""
+Fund & NAV — unitized multi-investor accounting.
+
+Each contribution buys units at the current NAV/unit, so contributions at
+different times are handled fairly. NAV = total contributed + realized P&L +
+unrealized P&L. Daily history is written by scripts/daily_snapshot.py.
+"""
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+import datetime
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+import bbg_style
+import db
+from shared import compute_book_pnl
+
+st.set_page_config(page_title="Fund & NAV", layout="wide")
+bbg_style.inject()
+
+if not st.session_state.get("authenticated"):
+    st.warning("Please log in.")
+    if st.button("HOME"): st.switch_page("app.py")
+    st.stop()
+
+c_nav1, _ = st.columns([1, 9])
+with c_nav1:
+    if st.button("HOME"): st.switch_page("app.py")
+
+st.title("FUND & NAV")
+st.caption("UNITIZED MULTI-INVESTOR FUND | EACH CONTRIBUTION BUYS UNITS AT THE NAV/UNIT OF ITS DATE")
+
+SEED_NAV_PER_UNIT = 100.0   # first contribution prices units at $100 each
+
+# ── Current fund value ────────────────────────────────────────────────────────
+trades = db.get_trades_df()
+with st.spinner("MARKING BOOK..."):
+    realized, unreal = compute_book_pnl(trades)
+
+contribs = db.load_contributions()
+total_contributed = float(pd.to_numeric(contribs["amount"], errors="coerce").sum()) if not contribs.empty else 0.0
+total_units       = float(pd.to_numeric(contribs["units_issued"], errors="coerce").sum()) if not contribs.empty else 0.0
+
+nav = total_contributed + realized + unreal
+nav_per_unit = (nav / total_units) if total_units > 0 else SEED_NAV_PER_UNIT
+
+k1, k2, k3, k4, k5 = st.columns(5)
+k1.metric("FUND NAV",        f"${nav:,.0f}")
+k2.metric("CONTRIBUTED",     f"${total_contributed:,.0f}")
+k3.metric("REALIZED P&L",    f"${realized:,.0f}")
+k4.metric("UNREALIZED P&L",  f"${unreal:,.0f}")
+k5.metric("NAV / UNIT",      f"${nav_per_unit:,.2f}",
+          f"{(nav_per_unit/SEED_NAV_PER_UNIT-1):+.1%}" if total_units > 0 else None)
+
+st.markdown("---")
+
+# ── Investors & contributions ─────────────────────────────────────────────────
+left, right = st.columns(2)
+
+with left:
+    st.markdown("### INVESTORS")
+    investors = db.load_investors()
+    ni1, ni2 = st.columns([3, 1])
+    new_inv = ni1.text_input("ADD INVESTOR", key="new_inv").strip()
+    ni2.markdown(" ")
+    if ni2.button("ADD", use_container_width=True) and new_inv:
+        db.add_investor(new_inv)
+        st.rerun()
+    st.caption(", ".join(investors) if investors else "No investors yet.")
+
+with right:
+    st.markdown("### LOG A CONTRIBUTION")
+    if not investors:
+        st.caption("Add an investor first.")
+    else:
+        cc1, cc2, cc3 = st.columns(3)
+        c_inv  = cc1.selectbox("INVESTOR", investors, key="c_inv")
+        c_amt  = cc2.number_input("AMOUNT ($)", min_value=0.0, step=1000.0, key="c_amt")
+        c_date = cc3.date_input("DATE", datetime.date.today(), key="c_date")
+        units_now = c_amt / nav_per_unit if nav_per_unit > 0 else 0
+        st.caption(f"At NAV/unit ${nav_per_unit:,.2f} → **{units_now:,.2f} units** issued.")
+        if st.button("ADD CONTRIBUTION", type="primary") and c_amt > 0:
+            db.add_contribution(c_inv, c_date.isoformat(), c_amt, units_now, nav_per_unit)
+            st.success(f"{c_inv} contributed ${c_amt:,.0f} → {units_now:,.2f} units.")
+            st.rerun()
+
+st.markdown("---")
+
+# ── Ownership table ───────────────────────────────────────────────────────────
+st.markdown("### OWNERSHIP")
+if contribs.empty:
+    st.info("No contributions yet. Add investors and log their initial capital above.")
+else:
+    g = contribs.groupby("investor").agg(
+        CONTRIBUTED=("amount", "sum"),
+        UNITS=("units_issued", "sum"),
+    ).reset_index().rename(columns={"investor": "INVESTOR"})
+    g["VALUE"]    = g["UNITS"] * nav_per_unit
+    g["OWNERSHIP"]= g["UNITS"] / total_units if total_units else 0
+    g["P&L"]      = g["VALUE"] - g["CONTRIBUTED"]
+    g["RETURN"]   = np.where(g["CONTRIBUTED"] > 0, g["VALUE"] / g["CONTRIBUTED"] - 1, 0)
+
+    def color_pnl(v):
+        try: return "color:#00e676" if float(v) > 0 else "color:#ff4444" if float(v) < 0 else ""
+        except: return ""
+
+    st.dataframe(
+        g.style.map(color_pnl, subset=["P&L", "RETURN"]).format({
+            "CONTRIBUTED": "${:,.0f}", "UNITS": "{:,.2f}", "VALUE": "${:,.0f}",
+            "OWNERSHIP": "{:.1%}", "P&L": "${:,.0f}", "RETURN": "{:+.1%}",
+        }), use_container_width=True, hide_index=True)
+
+    with st.expander("ALL CONTRIBUTIONS"):
+        st.dataframe(
+            contribs.sort_values("date").style.format({
+                "amount": "${:,.0f}", "units_issued": "{:,.2f}", "nav_per_unit": "${:,.2f}",
+            }), use_container_width=True, hide_index=True)
+
+# ── NAV history (daily snapshots) ─────────────────────────────────────────────
+if db.configured():
+    fs = db.load_fund_snapshots()
+    if not fs.empty and "snap_date" in fs.columns:
+        st.markdown("---")
+        st.markdown("### NAV PER UNIT — HISTORY")
+        fs = fs.sort_values("snap_date")
+        fig = go.Figure()
+        fig.add_scatter(x=fs["snap_date"], y=pd.to_numeric(fs["nav_per_unit"], errors="coerce"),
+                        mode="lines+markers", line=dict(color="#00c8ff", width=2))
+        fig.add_hline(y=SEED_NAV_PER_UNIT, line_color="#444444", line_dash="dot")
+        fig.update_layout(
+            paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
+            font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
+            margin=dict(l=40, r=20, t=20, b=40), height=340, showlegend=False,
+            xaxis=dict(gridcolor="#1e1e1e"), yaxis=dict(gridcolor="#1e1e1e", tickprefix="$"))
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("ONE POINT PER TRADING DAY — WRITTEN AUTOMATICALLY BY THE SNAPSHOT JOB")
+
+st.markdown("---")
+st.caption("NAV = CONTRIBUTED + REALIZED + UNREALIZED  |  UNITS PRICED AT NAV/UNIT ON CONTRIBUTION DATE  |  "
+           "UNREALIZED MARKED AT LIVE OPTION MID / SPOT")

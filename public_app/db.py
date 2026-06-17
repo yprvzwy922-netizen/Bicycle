@@ -156,3 +156,66 @@ def load_portfolio_snapshots() -> pd.DataFrame:
         return pd.DataFrame(rows)
     except Exception:
         return pd.DataFrame()
+
+# ── Fund: investors / contributions / fund history ────────────────────────────
+CONTRIB_COLUMNS = ["id", "investor", "date", "amount", "units_issued", "nav_per_unit"]
+
+def load_investors() -> list:
+    if configured():
+        try:
+            rows = _rest("GET", "investors", params={"select": "*", "order": "name"}) or []
+            return [r["name"] for r in rows]
+        except Exception:
+            pass
+    return list(st.session_state.get("investors", []))
+
+def add_investor(name: str):
+    name = name.strip()
+    if not name:
+        return
+    if configured():
+        try:
+            _rest("POST", "investors", json=[{"name": name}],
+                  prefer="resolution=merge-duplicates,return=minimal")
+            return
+        except Exception as e:
+            st.warning(f"DB write failed — session only. ({e})")
+    st.session_state.setdefault("investors", [])
+    if name not in st.session_state["investors"]:
+        st.session_state["investors"].append(name)
+
+def load_contributions() -> pd.DataFrame:
+    if configured():
+        try:
+            rows = _rest("GET", "contributions",
+                         params={"select": "*", "order": "id"}) or []
+            df = pd.DataFrame(rows)
+            return df if not df.empty else pd.DataFrame(columns=CONTRIB_COLUMNS)
+        except Exception:
+            pass
+    return st.session_state.get("contributions", pd.DataFrame(columns=CONTRIB_COLUMNS))
+
+def add_contribution(investor, date, amount, units_issued, nav_per_unit):
+    cur = load_contributions()
+    new_id = (int(pd.to_numeric(cur["id"], errors="coerce").max()) + 1
+              if not cur.empty else 1)
+    rec = {"id": new_id, "investor": investor, "date": date,
+           "amount": float(amount), "units_issued": float(units_issued),
+           "nav_per_unit": float(nav_per_unit)}
+    if configured():
+        try:
+            _rest("POST", "contributions", json=[rec], prefer="return=minimal")
+            return
+        except Exception as e:
+            st.warning(f"DB write failed — session only. ({e})")
+    st.session_state["contributions"] = pd.concat(
+        [cur, pd.DataFrame([rec])], ignore_index=True)
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_fund_snapshots() -> pd.DataFrame:
+    try:
+        rows = _rest("GET", "fund_snapshots",
+                     params={"select": "*", "order": "snap_date"}) or []
+        return pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame()

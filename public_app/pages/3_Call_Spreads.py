@@ -89,6 +89,8 @@ for i, w in enumerate(wl):
             "ROC":          cs.get("roc"),
             "ANN ROC":      cs.get("ann_roc"),
             "OI":           cs.get("oi"),
+            "SPREAD":       cs.get("spread_pct"),
+            "SCORE":        cs.get("score"),
             "EXPIRY":       cs.get("expiry"),
             "DTE":          cs.get("dte"),
         })
@@ -123,7 +125,8 @@ st.markdown("---")
 # COMPANY and SECTOR kept in df for filtering but hidden from the table
 SHOW = ["TICKER","PRICE","TREND","IV RANK","EARN DAYS",
         "SHORT STRIKE","LONG STRIKE","SHORT DELTA","SHORT IV",
-        "NET CREDIT","SPREAD WIDTH","MAX LOSS","BREAKEVEN","ROC","ANN ROC","OI","EXPIRY"]
+        "NET CREDIT","SPREAD WIDTH","MAX LOSS","BREAKEVEN","ROC","ANN ROC",
+        "OI","SPREAD","SCORE","EXPIRY"]
 disp = df[[c for c in SHOW if c in df.columns]].copy()
 
 def st_(v):
@@ -147,10 +150,17 @@ def sivr(v):
         return "color:#888888"
     except: return ""
 
+def ssc(v):
+    try:
+        f = float(v)
+        return "color:#00e676;font-weight:700" if f>=75 else "color:#00c8ff;font-weight:600" if f>=50 else "color:#888888"
+    except: return ""
+
 styled = (disp.style
     .map(st_,  subset=["TREND"])
     .map(sivr, subset=["IV RANK"])
     .map(sroc, subset=["ANN ROC"])
+    .map(ssc,  subset=["SCORE"])
     .format({
         "PRICE":        "${:.2f}",
         "IV RANK":      "{:.0%}",
@@ -164,6 +174,8 @@ styled = (disp.style
         "BREAKEVEN":    "${:.2f}",
         "ROC":          "{:.1%}",
         "ANN ROC":      "{:.1%}",
+        "SPREAD":       "{:.1%}",
+        "SCORE":        "{:.0f}",
     }, na_rep="—"))
 
 st.dataframe(styled, use_container_width=True, hide_index=True)

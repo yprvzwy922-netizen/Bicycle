@@ -52,3 +52,29 @@ create table if not exists portfolio_snapshots (
   realized_pnl    double precision,
   cash_secured    double precision
 );
+
+-- ── Multi-investor unitized fund ──────────────────────────────────────────────
+create table if not exists investors (
+  name text primary key
+);
+
+-- Each contribution buys units at the NAV/unit on its date (unit accounting)
+create table if not exists contributions (
+  id            bigint primary key,
+  investor      text,
+  date          text,
+  amount        double precision,
+  units_issued  double precision,
+  nav_per_unit  double precision
+);
+
+-- Daily fund valuation (so history builds itself — no need to re-add trades)
+create table if not exists fund_snapshots (
+  snap_date     text primary key,
+  nav           double precision,
+  units         double precision,
+  nav_per_unit  double precision,
+  contributed   double precision,
+  realized_pnl  double precision,
+  unreal_pnl    double precision
+);

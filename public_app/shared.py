@@ -369,19 +369,31 @@ def best_put(tkr, delta_band, target_dte):
             "score": round(float(row["score"]), 1)}
 
 def best_call(tkr, target_delta, target_dte):
-    """Best covered call — OTM call closest to target_delta."""
+    """Best covered call — scores OTM calls in a band around target_delta.
+    Same scoring engine as puts: upside-room sits in the 'cushion' slot."""
+    weights = {"yield":0.40, "cushion":0.20, "delta":0.25, "liq":0.15}
     spot = fetch_spot(tkr)
     chain, expiry, dte = fetch_chain(tkr, target_dte, "call")
     if chain is None or chain.empty: return {}
     chain = chain[chain["impliedVolatility"] > 0].copy()
-    # Only OTM calls (strike > spot)
-    otm = chain[chain["strike"] > spot * 0.99]
-    if otm.empty: otm = chain
-    otm = otm.copy()
+    otm = chain[chain["strike"] > spot * 0.99].copy()
+    if otm.empty: otm = chain.copy()
     otm["delta"] = bs_call_delta(spot, otm["strike"].values,
                                  otm["impliedVolatility"].values, dte)
-    otm["dist"] = (otm["delta"] - target_delta).abs()
-    row = otm.loc[otm["dist"].idxmin()]
+    # Band around the track's target delta (±0.12); widen if empty
+    band = otm[(otm["delta"] >= target_delta - 0.12) &
+               (otm["delta"] <= target_delta + 0.12)].copy()
+    if band.empty:
+        band = otm.copy()
+
+    band["mid"]         = band["mid"].fillna(band["bid"])
+    band["ann_yield"]   = (band["mid"] / spot) * (365.0 / dte)   # yield on stock value
+    band["cushion_pct"] = (band["strike"] - spot) / spot          # upside room
+    if "spread_pct" not in band.columns:
+        band["spread_pct"] = (band["ask"] - band["bid"]) / band["mid"].replace(0, np.nan)
+
+    band["score"] = score_strikes(band, target_delta, weights)
+    row = band.loc[band["score"].idxmax()]
     prem = float(row["mid"]) if not np.isnan(row["mid"]) else float(row["bid"])
     strike = float(row["strike"])
     sp = float((row["ask"]-row["bid"])/row["mid"]) if row["mid"] > 0 else float("nan")
@@ -390,53 +402,83 @@ def best_call(tkr, target_delta, target_dte):
             "iv": round(float(row["impliedVolatility"]), 4),
             "premium": round(prem, 2),
             "ann_yield": round(ann_yield(prem, spot, dte), 4),  # yield on stock value
+            "cushion": round((strike - spot)/spot, 4),          # upside cap (unified slot)
             "upside_cap": round((strike - spot)/spot, 4),
             "breakeven_up": round(spot + prem, 2),
             "oi": int(row.get("openInterest", 0) or 0),
-            "spread_pct": round(sp, 3)}
+            "spread_pct": round(sp, 3),
+            "score": round(float(row["score"]), 1)}
 
 def best_bear_call_spread(tkr, short_delta, spread_width_pct, target_dte):
     """
-    Bear call spread: sell short_delta call, buy call at strike + spread_width.
-    spread_width_pct: e.g. 0.05 = 5% of spot above short strike.
+    Bear call spread: sell a call near short_delta, buy one ~spread_width_pct higher.
+    Scores candidate short strikes by ROC / delta-fit / liquidity and picks best.
     """
     spot = fetch_spot(tkr)
     chain, expiry, dte = fetch_chain(tkr, target_dte, "call")
     if chain is None or chain.empty: return {}
     chain = chain[chain["impliedVolatility"] > 0].copy()
+    chain["mid"] = chain["mid"].fillna(chain["bid"])
     otm = chain[chain["strike"] > spot * 0.99].copy()
     if otm.empty: return {}
     otm["delta"] = bs_call_delta(spot, otm["strike"].values,
                                  otm["impliedVolatility"].values, dte)
-    otm["dist"] = (otm["delta"] - short_delta).abs()
-    short_row = otm.loc[otm["dist"].idxmin()]
-    short_strike = float(short_row["strike"])
-    short_prem = float(short_row["mid"]) if not np.isnan(short_row["mid"]) else float(short_row["bid"])
+    band = otm[(otm["delta"] >= short_delta - 0.12) &
+               (otm["delta"] <= short_delta + 0.12)].copy()
+    if band.empty:
+        band = otm.copy()
 
-    # Long leg: next strike at least spread_width above short
-    long_target = short_strike * (1 + spread_width_pct)
-    long_candidates = chain[chain["strike"] >= long_target]
-    if long_candidates.empty: return {}
-    long_row = long_candidates.iloc[0]
-    long_strike = float(long_row["strike"])
-    long_prem = float(long_row["mid"]) if not np.isnan(long_row["mid"]) else float(long_row["bid"])
+    cands = []
+    for _, sr in band.iterrows():
+        sk  = float(sr["strike"])
+        sp_ = float(sr["mid"])
+        lc  = chain[chain["strike"] >= sk * (1 + spread_width_pct)]
+        if lc.empty:
+            continue
+        lr  = lc.iloc[0]
+        lk  = float(lr["strike"]); lp = float(lr["mid"])
+        net = sp_ - lp
+        width = lk - sk
+        ml  = width - net
+        if ml <= 0:
+            continue
+        cands.append({
+            "short_strike": sk, "long_strike": lk,
+            "short_delta": float(sr["delta"]),
+            "short_iv": float(sr["impliedVolatility"]),
+            "net_credit": net, "spread_width": width, "max_loss": ml,
+            "roc": net / ml,
+            "spread_pct": float((sr["ask"]-sr["bid"])/sp_) if sp_ > 0 else np.nan,
+            "oi": int(sr.get("openInterest", 0) or 0),
+        })
+    if not cands:
+        return {}
+    cdf = pd.DataFrame(cands)
+    # Reuse the scoring engine: ROC in the yield slot, ROC again as "cushion"
+    # (reward capital efficiency), delta-fit to the short target, liquidity.
+    cdf["ann_yield"]   = cdf["roc"]
+    cdf["cushion_pct"] = cdf["roc"]
+    cdf["delta"]       = cdf["short_delta"]
+    weights = {"yield":0.45, "cushion":0.15, "delta":0.25, "liq":0.15}
+    cdf["score"] = score_strikes(cdf, short_delta, weights)
+    row = cdf.loc[cdf["score"].idxmax()]
 
-    net_credit = round(short_prem - long_prem, 2)
-    spread_width = round(long_strike - short_strike, 2)
-    max_loss = round(spread_width - net_credit, 2)
-    roc = round(net_credit / max_loss, 4) if max_loss > 0 else float("nan")
-
+    net_credit = round(float(row["net_credit"]), 2)
+    max_loss   = round(float(row["max_loss"]), 2)
+    roc        = round(float(row["roc"]), 4)
     return {"expiry": expiry, "dte": dte,
-            "short_strike": short_strike, "long_strike": long_strike,
-            "short_delta": round(float(short_row["delta"]), 3),
-            "short_iv": round(float(short_row["impliedVolatility"]), 4),
+            "short_strike": float(row["short_strike"]), "long_strike": float(row["long_strike"]),
+            "short_delta": round(float(row["short_delta"]), 3),
+            "short_iv": round(float(row["short_iv"]), 4),
             "net_credit": net_credit,
-            "spread_width": spread_width,
+            "spread_width": round(float(row["spread_width"]), 2),
             "max_loss": max_loss,
-            "breakeven": round(short_strike + net_credit, 2),
+            "breakeven": round(float(row["short_strike"]) + net_credit, 2),
             "roc": roc,
-            "ann_roc": round(roc * 365/dte, 4) if dte > 0 and not np.isnan(roc) else float("nan"),
-            "oi": int(short_row.get("openInterest", 0) or 0)}
+            "ann_roc": round(roc * 365/dte, 4) if dte > 0 else float("nan"),
+            "oi": int(row["oi"]),
+            "spread_pct": round(float(row["spread_pct"]), 3) if not np.isnan(row["spread_pct"]) else None,
+            "score": round(float(row["score"]), 1)}
 
 @st.cache_data(ttl=60, show_spinner=False)  # 1-min cache — live option prices
 def fetch_option_live(tkr: str, strike: float, expiry: str, option_type: str = "put"):
@@ -455,6 +497,46 @@ def fetch_option_live(tkr: str, strike: float, expiry: str, option_type: str = "
         return mid, iv
     except Exception:
         return float("nan"), float("nan")
+
+
+def compute_book_pnl(trades):
+    """(realized, unrealized) P&L across the whole book — powers NAV.
+    Realized = Σ closed REALIZED PNL. Unrealized marks open positions at live
+    mid (options) / spot (stock). Stock multiplier 1, options 100."""
+    import pandas as _pd
+    if trades is None or trades.empty:
+        return 0.0, 0.0
+    realized = _pd.to_numeric(trades.get("REALIZED PNL"), errors="coerce").fillna(0).sum()
+
+    unreal = 0.0
+    open_t = trades[trades["STATUS"] == "OPEN"]
+    for _, t in open_t.iterrows():
+        strat = str(t["STRATEGY"])
+        ctrs  = int(t["CONTRACTS"]) if _pd.notna(t["CONTRACTS"]) else 0
+        prem  = float(t["PREMIUM / CREDIT"]) if _pd.notna(t["PREMIUM / CREDIT"]) else 0.0
+        tkr   = str(t["TICKER"])
+        if strat == "Long Stock":
+            try:
+                spot = fetch_spot(tkr)
+                if not np.isnan(spot) and prem > 0:
+                    unreal += (spot - prem) * ctrs
+            except Exception:
+                pass
+            continue
+        strike = float(t["SHORT STRIKE"]) if _pd.notna(t["SHORT STRIKE"]) else 0.0
+        expiry = str(t["EXPIRY"])
+        if strike <= 0 or expiry in ("nan", "None", ""):
+            continue
+        is_short = strat not in ("Long Put (Hedge)", "Long Call")
+        opt = "put" if "Put" in strat else "call"
+        try:
+            mid, _ = fetch_option_live(tkr, strike, expiry, opt)
+        except Exception:
+            mid = float("nan")
+        if np.isnan(mid):
+            continue
+        unreal += (prem - mid) * 100 * ctrs if is_short else (mid - prem) * 100 * ctrs
+    return float(realized), float(unreal)
 
 
 def score_put(ivr, ann_y, oi, sp, earn, dte_t, tech_s, conv):

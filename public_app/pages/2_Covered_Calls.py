@@ -1,5 +1,7 @@
 """
-Covered Call Screener
+Covered Call Screener — recommends calls ONLY on stock you hold in the book.
+Wheel names -> lower-delta calls (keep upside); Income names -> higher-delta
+calls (more premium, get called away and recycle).
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -8,8 +10,9 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import bbg_style
+import db
 from shared import (get_watchlist, fetch_spot, fetch_hist, fetch_earnings,
-                    best_call, trend_label_score, rv_percentile, prefetch, SECTORS)
+                    best_call, trend_label_score, rv_percentile, prefetch)
 
 st.set_page_config(page_title="Covered Calls", layout="wide")
 bbg_style.inject()
@@ -24,145 +27,141 @@ with c_nav1:
     if st.button("HOME"): st.switch_page("app.py")
 
 st.title("COVERED CALL SCREENER")
-st.caption("STRATEGY: SELL OTM CALL ON OWNED STOCK | YIELD = PREMIUM / SPOT PRICE | UPSIDE CAP = (STRIKE - SPOT) / SPOT")
+st.caption("SELLS CALLS ONLY ON STOCK YOU HOLD | WHEEL = LOWER DELTA (KEEP UPSIDE) | INCOME = HIGHER DELTA (GET CALLED AWAY)")
 
-st.markdown("""
-**How to read this screen:**
-Sell a covered call by writing a call option against stock you already own.
-You collect the premium immediately. If the stock stays below the strike at expiry, you keep the premium.
-If it rises above, you sell your stock at the strike — you still profit up to that level plus the premium.
-Best used on names you own in a **sideways to mildly bullish** environment.
-""")
-
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+# ── Track-based delta targets (manual + your spec) ────────────────────────────
 with st.sidebar:
-    st.markdown("### FILTERS")
-    f_delta    = st.slider("TARGET CALL DELTA", 0.10, 0.50, 0.25, 0.01,
-                           help="0.20-0.30 = conservative, 0.30-0.40 = aggressive")
+    st.markdown("### TARGET CALL DELTA")
+    WHEEL_DELTA  = st.slider("WHEEL NAMES",  0.10, 0.40, 0.20, 0.01,
+                             help="High-conviction names you want to keep — lower delta, more upside")
+    INCOME_DELTA = st.slider("INCOME NAMES", 0.20, 0.50, 0.35, 0.01,
+                             help="Names you want called away to recycle — higher delta, more premium")
     f_tenor    = st.selectbox("TENOR", ["1M (~35 DTE)", "3M (~90 DTE)"])
     target_dte = 35 if "1M" in f_tenor else 90
-    f_min_yld  = st.number_input("MIN ANN YIELD (%)", min_value=0, max_value=200, value=8, step=2)
-    f_min_yld  = f_min_yld / 100
-    f_min_cap  = st.slider("MIN UPSIDE CAP %", 0.0, 0.30, 0.02, 0.005, format="%.1f%%")
-    f_sectors  = st.multiselect("SECTOR", SECTORS, default=[])
-    f_buckets  = st.multiselect("BUCKET", ["Core","Growth","Speculative"], default=[])
     st.markdown("---")
     if st.button("REFRESH", type="primary", use_container_width=True):
         st.cache_data.clear()
 
-# ── Build rows ────────────────────────────────────────────────────────────────
-wl = get_watchlist()
-rows, errors = [], []
-prog = st.progress(0, text="FETCHING MARKET DATA...")
-prefetch([w["ticker"] for w in wl], dtes=(target_dte,), option_type="call")
+# ── Held stock = Long Stock positions in the book ─────────────────────────────
+trades = db.get_trades_df()
+held = pd.DataFrame()
+if not trades.empty:
+    held = trades[(trades["STATUS"] == "OPEN") & (trades["STRATEGY"] == "Long Stock")].copy()
 
-for i, w in enumerate(wl):
-    tkr = w["ticker"]
+if held.empty:
+    st.info("No stock held. Covered calls only apply to shares you own — get assigned on a put "
+            "(Trade Log) or add a Long Stock position, then come back.")
+    if st.button("GO TO TRADE LOG", type="primary"):
+        st.switch_page("pages/5_Trade_Log.py")
+    st.stop()
+
+# Shares held per ticker + track from the watchlist
+shares_by_tkr = held.groupby("TICKER")["CONTRACTS"].sum().to_dict()
+wl_map = {w["ticker"]: w for w in get_watchlist()}
+
+prog = st.progress(0, text="FETCHING MARKET DATA...")
+tickers = list(shares_by_tkr.keys())
+prefetch(tickers, dtes=(target_dte,), option_type="call")
+
+rows, errors = [], []
+for i, tkr in enumerate(tickers):
     try:
+        info  = wl_map.get(tkr, {})
+        track = info.get("delta_band", "Income")
+        tgt   = WHEEL_DELTA if track == "Wheel" else INCOME_DELTA
         spot  = fetch_spot(tkr)
         hist  = fetch_hist(tkr)
         earn  = fetch_earnings(tkr)
         trend, _ = trend_label_score(hist)
         ivr   = rv_percentile(hist)
-        cc    = best_call(tkr, f_delta, target_dte)
-        if not cc: continue
-
+        cc    = best_call(tkr, tgt, target_dte)
+        if not cc:
+            continue
+        shares    = int(shares_by_tkr[tkr])
+        max_calls = shares // 100
         rows.append({
-            "TICKER":      tkr,
-            "COMPANY":     w["company"],
-            "SECTOR":      w["sector"],
-            "BUCKET":      w["bucket"],
-            "PRICE":       round(spot, 2),
-            "TREND":       trend,
-            "IV RANK":     round(ivr, 2),
-            "EARN DAYS":   earn if earn is not None else "—",
-            "CALL STRIKE": cc.get("strike"),
-            "CALL DELTA":  cc.get("delta"),
-            "CALL IV":     cc.get("iv"),
-            "PREMIUM":     cc.get("premium"),
-            "ANN YIELD":   cc.get("ann_yield"),
-            "UPSIDE CAP":  cc.get("upside_cap"),
-            "BREAKEVEN UP":cc.get("breakeven_up"),
-            "OI":          cc.get("oi"),
-            "EXPIRY":      cc.get("expiry"),
-            "DTE":         cc.get("dte"),
-            "ILLIQUID":    "YES" if not np.isnan(cc.get("spread_pct", 0) or 0) and cc.get("spread_pct", 0) > 0.10 else "",
+            "TICKER":     tkr,
+            "SECTOR":     info.get("sector", "Unknown"),
+            "TRACK":      track,
+            "SHARES":     shares,
+            "MAX CALLS":  max_calls,
+            "PRICE":      round(spot, 2),
+            "TREND":      trend,
+            "IV RANK":    round(ivr, 2),
+            "EARN DAYS":  earn if earn is not None else "—",
+            "STRIKE":     cc.get("strike"),
+            "DELTA":      cc.get("delta"),
+            "TGT DELTA":  round(tgt, 2),
+            "IV":         cc.get("iv"),
+            "PREMIUM":    cc.get("premium"),
+            "ANN YIELD":  cc.get("ann_yield"),
+            "UPSIDE CAP": cc.get("upside_cap"),
+            "OI":         cc.get("oi"),
+            "SPREAD":     cc.get("spread_pct"),
+            "SCORE":      cc.get("score"),
+            "EXPIRY":     cc.get("expiry"),
         })
     except Exception as e:
         errors.append(f"{tkr}: {e}")
-    prog.progress((i+1)/len(wl), text=f"LOADING {tkr}...")
-
+    prog.progress((i+1)/len(tickers), text=f"LOADING {tkr}...")
 prog.empty()
+
 if errors:
     with st.expander(f"{len(errors)} ERRORS"): [st.text(e) for e in errors]
 
 df = pd.DataFrame(rows)
 if df.empty:
-    st.warning("No data loaded.")
+    st.warning("No call data loaded for held names.")
     st.stop()
 
-# ── Filters ───────────────────────────────────────────────────────────────────
-if f_min_yld:  df = df[df["ANN YIELD"].fillna(0) >= f_min_yld]
-if f_min_cap:  df = df[df["UPSIDE CAP"].fillna(0) >= f_min_cap]
-if f_sectors:  df = df[df["SECTOR"].isin(f_sectors)]
-if f_buckets:  df = df[df["BUCKET"].isin(f_buckets)]
-
 # ── KPIs ──────────────────────────────────────────────────────────────────────
-avg_yld = df["ANN YIELD"].mean()
-avg_cap = df["UPSIDE CAP"].mean()
 k1,k2,k3 = st.columns(3)
-k1.metric("TICKERS SHOWN", len(df))
-k2.metric("AVG ANN YIELD", f"{avg_yld:.1%}" if not np.isnan(avg_yld) else "—")
-k3.metric("AVG UPSIDE CAP", f"{avg_cap:.1%}" if not np.isnan(avg_cap) else "—")
+k1.metric("HELD NAMES", len(df))
+k2.metric("AVG ANN YIELD", f"{df['ANN YIELD'].mean():.1%}")
+k3.metric("AVG UPSIDE CAP", f"{df['UPSIDE CAP'].mean():.1%}")
 st.markdown("---")
 
-# ── Table ─────────────────────────────────────────────────────────────────────
-# COMPANY and SECTOR kept in df for filtering but hidden from the table
-SHOW = ["TICKER","PRICE","TREND","IV RANK","EARN DAYS",
-        "CALL STRIKE","CALL DELTA","CALL IV","PREMIUM","ANN YIELD","UPSIDE CAP","BREAKEVEN UP","OI","EXPIRY","ILLIQUID"]
+# ── Table (unified layout) ────────────────────────────────────────────────────
+SHOW = ["TICKER","TRACK","SHARES","MAX CALLS","PRICE","TREND","IV RANK","EARN DAYS",
+        "STRIKE","DELTA","TGT DELTA","IV","PREMIUM","ANN YIELD","UPSIDE CAP",
+        "OI","SPREAD","SCORE","EXPIRY"]
 disp = df[[c for c in SHOW if c in df.columns]].copy()
 
 def st_(v):
     if "UP" in str(v): return "color:#00e676"
     if "DOWN" in str(v): return "color:#ff4444"
     return "color:#888888"
-
-def ill(v): return "color:#ff9900;font-weight:600" if v == "YES" else ""
-
 def sivr(v):
     try:
         f = float(v)
-        if f >= 0.7: return "color:#00e676;font-weight:600"
-        if f >= 0.4: return "color:#ff9900"
-        return "color:#888888"
+        return "color:#00e676;font-weight:600" if f>=0.7 else "color:#ff9900" if f>=0.4 else "color:#888888"
     except: return ""
+def ssc(v):
+    try:
+        f = float(v)
+        return "color:#00e676;font-weight:700" if f>=75 else "color:#00c8ff;font-weight:600" if f>=50 else "color:#888888"
+    except: return ""
+def strk(v):
+    return "color:#00c8ff" if str(v)=="Wheel" else "color:#ff9900"
 
 styled = (disp.style
-    .map(st_,  subset=["TREND"])
-    .map(sivr, subset=["IV RANK"])
-    .map(ill,  subset=["ILLIQUID"])
+    .map(st_,   subset=["TREND"])
+    .map(sivr,  subset=["IV RANK"])
+    .map(ssc,   subset=["SCORE"])
+    .map(strk,  subset=["TRACK"])
     .format({
-        "PRICE":       "${:.2f}",
-        "IV RANK":     "{:.0%}",
-        "CALL STRIKE": "${:.2f}",
-        "CALL DELTA":  "{:.3f}",
-        "CALL IV":     "{:.1%}",
-        "PREMIUM":     "${:.2f}",
-        "ANN YIELD":   "{:.1%}",
-        "UPSIDE CAP":  "{:.1%}",
-        "BREAKEVEN UP":"${:.2f}",
+        "PRICE":"${:.2f}", "IV RANK":"{:.0%}", "STRIKE":"${:.2f}",
+        "DELTA":"{:.3f}", "TGT DELTA":"{:.2f}", "IV":"{:.1%}", "PREMIUM":"${:.2f}",
+        "ANN YIELD":"{:.1%}", "UPSIDE CAP":"{:.1%}", "SPREAD":"{:.1%}", "SCORE":"{:.0f}",
     }, na_rep="—"))
 
 st.dataframe(styled, use_container_width=True, hide_index=True)
 
-# ── Earnings warning ──────────────────────────────────────────────────────────
-try:
-    warn = df[pd.to_numeric(df["EARN DAYS"], errors="coerce").fillna(999) < 35]
-    if not warn.empty:
-        names = ", ".join(f"{r['TICKER']} ({r['EARN DAYS']}d)" for _,r in warn.iterrows())
-        st.warning(f"EARNINGS WITHIN 35 DAYS: {names} — covered calls through earnings carry gap risk.")
-except Exception:
-    pass
+warn = df[pd.to_numeric(df["EARN DAYS"], errors="coerce").fillna(999) < 35]
+if not warn.empty:
+    names = ", ".join(f"{r['TICKER']} ({r['EARN DAYS']}d)" for _,r in warn.iterrows())
+    st.warning(f"EARNINGS WITHIN 35 DAYS: {names} — covered calls through earnings carry gap risk.")
 
 st.markdown("---")
-st.caption("YIELD = PREMIUM / SPOT (not strike) | UPSIDE CAP = max gain if called away | ALWAYS RECONCILE WITH BROKER")
+st.caption("YIELD = PREMIUM / SPOT | UPSIDE CAP = max gain if called away | MAX CALLS = shares // 100 | "
+           "SCORE = yield + upside-room + delta-fit + liquidity | ALWAYS RECONCILE WITH BROKER")

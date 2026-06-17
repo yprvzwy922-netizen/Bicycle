@@ -99,3 +99,23 @@ rest("POST", "portfolio_snapshots", json=[{
 }], prefer="resolution=merge-duplicates,return=minimal")
 
 print(f"portfolio snapshot {TODAY}: open={len(open_t)} unreal=${unreal:,.0f} realized=${realized:,.0f}")
+
+# ── Fund NAV snapshot (unitized) ──────────────────────────────────────────────
+try:
+    contribs = rest("GET", "contributions", params={"select": "*"}) or []
+    contributed = sum(float(c["amount"] or 0) for c in contribs)
+    units       = sum(float(c["units_issued"] or 0) for c in contribs)
+    nav         = contributed + realized + unreal
+    nav_per_unit = (nav / units) if units > 0 else 100.0
+    rest("POST", "fund_snapshots", json=[{
+        "snap_date": TODAY,
+        "nav": round(nav, 2),
+        "units": round(units, 4),
+        "nav_per_unit": round(nav_per_unit, 4),
+        "contributed": round(contributed, 2),
+        "realized_pnl": round(realized, 2),
+        "unreal_pnl": round(unreal, 2),
+    }], prefer="resolution=merge-duplicates,return=minimal")
+    print(f"fund snapshot {TODAY}: NAV=${nav:,.0f} units={units:,.2f} nav/unit=${nav_per_unit:,.2f}")
+except Exception as e:
+    print(f"fund snapshot skipped: {e}")

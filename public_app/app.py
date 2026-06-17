@@ -81,5 +81,13 @@ with col6:
     if st.button("OPEN PORTFOLIO", type="primary", use_container_width=True):
         st.switch_page("pages/6_Portfolio.py")
 
+st.markdown("---")
+col7, col8, col9 = st.columns(3, gap="large")
+with col7:
+    st.markdown("**FUND & NAV**")
+    st.markdown("Multi-investor unitized fund — contributions, ownership %, NAV history.")
+    if st.button("OPEN FUND & NAV", type="primary", use_container_width=True):
+        st.switch_page("pages/7_Fund.py")
+
 st.markdown(" ")
 st.caption("DATA: YFINANCE (FREE, BEST-EFFORT) | MATH: BLACK-SCHOLES EUROPEAN APPROX | NOT EXECUTION READY")
