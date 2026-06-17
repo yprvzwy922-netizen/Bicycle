@@ -390,13 +390,20 @@ st.caption(f"MAX PROFIT ${sel_prem*100:,.0f} (PREMIUM)  |  "
 
 # ── Add to order ticket ───────────────────────────────────────────────────────
 st.markdown("### ADD TO ORDER TICKET")
+sel_bid = float(sel_row["bid"]) if not np.isnan(sel_row["bid"]) else sel_prem
+# Whenever the strike changes, refresh PRICE (to the bid) and CONTRACTS (to the
+# $25k-tranche size) — they're still editable before you add.
+if st.session_state.get("at_last_strike") != sel_strike:
+    st.session_state["at_price"] = round(sel_bid, 2)
+    st.session_state["at_cts"]   = int(sel_row["cts_25k"]) if sel_row["cts_25k"] >= 1 else 1
+    st.session_state["at_last_strike"] = sel_strike
+
 at1, at2, at3, at4, at5 = st.columns([1.2, 1.2, 1.4, 1.2, 2])
 at_action = at1.selectbox("ACTION", ["sell", "buy"], key="at_action")
-at_cts    = at2.number_input("CONTRACTS", min_value=1,
-                             value=int(sel_row["cts_25k"]) if sel_row["cts_25k"] >= 1 else 1,
-                             key="at_cts", help="Defaults to the $25k-tranche size")
-at_price  = at3.number_input("PRICE (per share)", min_value=0.0, value=round(sel_prem, 2),
-                             step=0.01, key="at_price")
+at_cts    = at2.number_input("CONTRACTS", min_value=1, step=1, key="at_cts",
+                             help="Defaults to the $25k-tranche size")
+at_price  = at3.number_input("PRICE (BID)", min_value=0.0, step=0.01, key="at_price",
+                             help="Defaults to the live bid — adjust to your limit")
 at4.markdown(" "); at4.markdown(" ")
 if at4.button("＋ ADD", type="primary", use_container_width=True):
     ticket.add_to_ticket(at_action, ticker, expiry, opt, sel_strike, at_price, at_cts)
