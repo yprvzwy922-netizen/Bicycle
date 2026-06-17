@@ -113,13 +113,17 @@ def get_trades_df() -> pd.DataFrame:
         st.session_state["trades"] = pd.DataFrame(columns=TRADE_COLUMNS)
     return st.session_state["trades"]
 
-def save_trades_df(df: pd.DataFrame):
+def save_trades_df(df: pd.DataFrame) -> bool:
+    """Returns True if persisted (DB write ok, or session-only mode)."""
     st.session_state["trades"] = df
     if configured():
         try:
             replace_trades(df)
+            return True
         except Exception as e:
             st.error(f"DB write failed — change kept in session only. ({e})")
+            return False
+    return True
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=30, show_spinner=False)

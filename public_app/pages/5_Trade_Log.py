@@ -45,17 +45,20 @@ with c_imp:
                 if c not in loaded.columns:
                     loaded[c] = None
             loaded = loaded[COLUMNS]
-            # Import key changes each upload so the same file isn't re-imported every rerun
+            # Guard so the held file isn't re-imported on every rerun — only set
+            # AFTER a successful save, so a failed import can be retried.
             imp_key = f"{uploaded.name}_{len(loaded)}"
             if st.session_state.get("last_import") != imp_key:
                 merged = pd.concat([trades, loaded], ignore_index=True)
                 merged = merged.drop_duplicates(subset=["ID"], keep="last")
-                db.save_trades_df(merged)
-                st.session_state["last_import"] = imp_key
-                st.success(f"Imported {len(loaded)} trades (merged by ID).")
-                st.rerun()
+                ok = db.save_trades_df(merged)
+                if ok:
+                    st.session_state["last_import"] = imp_key
+                    st.success(f"Imported {len(loaded)} trades (merged by ID).")
+                    st.rerun()
+                # on failure, db.save_trades_df already showed the Supabase error
         except Exception as e:
-            st.error(f"Failed: {e}")
+            st.error(f"CSV import failed: {e}")
 with c_exp:
     st.markdown(" ")
     if not trades.empty:
