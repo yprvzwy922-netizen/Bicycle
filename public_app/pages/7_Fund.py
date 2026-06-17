@@ -142,24 +142,68 @@ else:
                 "amount": "${:,.0f}", "units_issued": "{:,.2f}", "nav_per_unit": "${:,.2f}",
             }), use_container_width=True, hide_index=True)
 
-# ── NAV history (daily snapshots) ─────────────────────────────────────────────
+# ── History (daily snapshots) ─────────────────────────────────────────────────
 if db.configured():
     fs = db.load_fund_snapshots()
     if not fs.empty and "snap_date" in fs.columns:
+        fs = fs.sort_values("snap_date").reset_index(drop=True)
+        fs["nav"]         = pd.to_numeric(fs["nav"], errors="coerce")
+        fs["contributed"] = pd.to_numeric(fs["contributed"], errors="coerce").fillna(0)
+        fs["nav_per_unit"]= pd.to_numeric(fs["nav_per_unit"], errors="coerce")
+        # Daily cash infusion = change in cumulative contributions
+        fs["infusion"] = fs["contributed"].diff().fillna(fs["contributed"]).clip(lower=0)
+
         st.markdown("---")
-        st.markdown("### NAV PER UNIT — HISTORY")
-        fs = fs.sort_values("snap_date")
+        st.markdown("### FUND VALUE ($) — HISTORY")
+
+        # Build a NAV series where a cash infusion shows as a VERTICAL JUMP on its
+        # day (insert a pre-infusion point at nav - infusion), not a diagonal.
+        xs, ys = [], []
+        for _, r in fs.iterrows():
+            if r["infusion"] > 0:
+                xs.append(r["snap_date"]); ys.append(r["nav"] - r["infusion"])  # just before infusion
+            xs.append(r["snap_date"]); ys.append(r["nav"])                       # after infusion / EOD
+
         fig = go.Figure()
-        fig.add_scatter(x=fs["snap_date"], y=pd.to_numeric(fs["nav_per_unit"], errors="coerce"),
-                        mode="lines+markers", line=dict(color="#00c8ff", width=2))
-        fig.add_hline(y=SEED_NAV_PER_UNIT, line_color="#444444", line_dash="dot")
+        # Cumulative contributions as a step line (the "money in" baseline)
+        fig.add_scatter(x=fs["snap_date"], y=fs["contributed"], name="CONTRIBUTED",
+                        mode="lines", line=dict(color="#ff9900", width=1, shape="hv"))
+        # Fund value, with infusion jumps
+        fig.add_scatter(x=xs, y=ys, name="FUND VALUE", mode="lines",
+                        line=dict(color="#00c8ff", width=2))
+        # Mark each infusion
+        inf = fs[fs["infusion"] > 0]
+        for _, r in inf.iterrows():
+            fig.add_annotation(x=r["snap_date"], y=r["nav"],
+                               text=f"+${r['infusion']:,.0f}", showarrow=True, arrowhead=2,
+                               font=dict(color="#ff9900", size=10), arrowcolor="#ff9900")
         fig.update_layout(
             paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
             font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
-            margin=dict(l=40, r=20, t=20, b=40), height=340, showlegend=False,
+            legend=dict(orientation="h", y=1.12),
+            margin=dict(l=40, r=20, t=30, b=40), height=360,
             xaxis=dict(gridcolor="#1e1e1e"), yaxis=dict(gridcolor="#1e1e1e", tickprefix="$"))
         st.plotly_chart(fig, use_container_width=True)
-        st.caption("ONE POINT PER TRADING DAY — WRITTEN AUTOMATICALLY BY THE SNAPSHOT JOB")
+        st.caption("Cash infusions show as a vertical JUMP on their day (orange = money in). "
+                   "The gap between FUND VALUE and CONTRIBUTED is performance P&L.")
+
+        st.markdown("### NAV PER UNIT — HISTORY")
+        st.caption("Per-unit value is unaffected by infusions (that's the point of unit accounting) "
+                   "— this line is pure performance.")
+        fig2 = go.Figure()
+        fig2.add_scatter(x=fs["snap_date"], y=fs["nav_per_unit"],
+                         mode="lines+markers", line=dict(color="#00e676", width=2))
+        fig2.add_hline(y=SEED_NAV_PER_UNIT, line_color="#444444", line_dash="dot")
+        fig2.update_layout(
+            paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
+            font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
+            margin=dict(l=40, r=20, t=20, b=40), height=320, showlegend=False,
+            xaxis=dict(gridcolor="#1e1e1e"), yaxis=dict(gridcolor="#1e1e1e", tickprefix="$"))
+        st.plotly_chart(fig2, use_container_width=True)
+    else:
+        st.markdown("---")
+        st.info("NAV history will appear here once the daily snapshot job has run "
+                "(see Phase B setup). Each trading day adds one point.")
 
 st.markdown("---")
 st.caption("NAV = CONTRIBUTED + REALIZED + UNREALIZED  |  UNITS PRICED AT NAV/UNIT ON CONTRIBUTION DATE  |  "

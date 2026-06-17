@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
+import ticket
 import bbg_style
 from shared import (get_watchlist, add_to_watchlist, remove_from_watchlist,
                     fetch_spot, fetch_chain, bs_put_delta, bs_call_delta,
@@ -386,6 +387,24 @@ st.plotly_chart(fig_po, use_container_width=True)
 st.caption(f"MAX PROFIT ${sel_prem*100:,.0f} (PREMIUM)  |  "
            f"BREAKEVEN ${be:.2f} ({(be-spot)/spot:+.1%} FROM SPOT)  |  "
            f"GTC BUY-TO-CLOSE TARGET (50%): ${sel_prem/2:.2f}")
+
+# ── Add to order ticket ───────────────────────────────────────────────────────
+st.markdown("### ADD TO ORDER TICKET")
+at1, at2, at3, at4, at5 = st.columns([1.2, 1.2, 1.4, 1.2, 2])
+at_action = at1.selectbox("ACTION", ["sell", "buy"], key="at_action")
+at_cts    = at2.number_input("CONTRACTS", min_value=1,
+                             value=int(sel_row["cts_25k"]) if sel_row["cts_25k"] >= 1 else 1,
+                             key="at_cts", help="Defaults to the $25k-tranche size")
+at_price  = at3.number_input("PRICE (per share)", min_value=0.0, value=round(sel_prem, 2),
+                             step=0.01, key="at_price")
+at4.markdown(" "); at4.markdown(" ")
+if at4.button("＋ ADD", type="primary", use_container_width=True):
+    ticket.add_to_ticket(at_action, ticker, expiry, opt, sel_strike, at_price, at_cts)
+    st.success("Added: " + ticket.format_line(ticket.get_ticket()[-1]))
+n_ticket = len(ticket.get_ticket())
+at5.markdown(" ")
+if at5.button(f"VIEW TICKET ({n_ticket})", use_container_width=True):
+    st.switch_page("pages/8_Order_Ticket.py")
 
 st.markdown("---")
 st.caption("DECISION SUPPORT ONLY | ALWAYS RECONCILE PREMIUM, IV, AND DELTA WITH BROKER LIVE CHAIN BEFORE TRADING")
