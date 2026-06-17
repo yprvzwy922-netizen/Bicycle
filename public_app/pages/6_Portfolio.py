@@ -71,6 +71,11 @@ open_trades = trades[trades["STATUS"] == "OPEN"].copy()
 wl = get_watchlist()
 wl_map = {w["ticker"]: w for w in wl}
 
+# Tickers where we already hold the shares as their own Long Stock row — a
+# covered call on these is just the SHORT CALL leg (the +1 stock delta is
+# already counted by the stock row, so don't double-count it here).
+stock_tickers = set(open_trades[open_trades["STRATEGY"] == "Long Stock"]["TICKER"].astype(str))
+
 # ── Enrich with live data ─────────────────────────────────────────────────────
 rows = []
 for _, t in open_trades.iterrows():
@@ -83,6 +88,9 @@ for _, t in open_trades.iterrows():
     strat        = str(t["STRATEGY"])
     is_stock     = strat == "Long Stock"
     is_cc        = strat == "Covered Call"
+    # Standalone CC = covered call with no separately-logged stock -> treat as
+    # the combined position (stock + short call). Otherwise = short call only.
+    cc_standalone = is_cc and tkr not in stock_tickers
     mult         = 1 if is_stock else 100            # stock P&L is per share
     short_strike = float(t["SHORT STRIKE"]) if pd.notna(t["SHORT STRIKE"]) else 0.0
     long_strike  = float(t["LONG STRIKE"])  if pd.notna(t["LONG STRIKE"])  else 0.0
@@ -118,7 +126,8 @@ for _, t in open_trades.iterrows():
     # Sign convention:
     #   Long Stock   = +1.0 per share
     #   Short Put    = +delta (bullish) | Short Call (naked) = -delta
-    #   Covered Call = stock + short call = 1 - call_delta (bullish, capped)
+    #   Covered Call = short call leg = -call_delta IF stock is logged separately;
+    #                  combined (1 - call_delta) only when stock is NOT logged
     #   Long Put     = -delta | Long Call = +delta
     delta        = float("nan")
     dollar_delta = float("nan")
@@ -127,7 +136,7 @@ for _, t in open_trades.iterrows():
             delta = 1.0
         elif is_cc and short_strike > 0:
             d = abs(bs_call_delta(spot, short_strike, iv_used, dte_rem))
-            delta = 1.0 - d                    # owned stock (+1) plus short call (-d)
+            delta = (1.0 - d) if cc_standalone else (-d)   # avoid double-counting stock
         elif is_put and short_strike > 0:
             d = abs(bs_put_delta(spot, short_strike, iv_used, dte_rem))
             delta = +d if is_short else -d     # short put = +delta
@@ -253,6 +262,7 @@ for _, t in open_trades.iterrows():
         "_IS_SPREAD":    is_spread,
         "_IS_STOCK":     is_stock,
         "_IS_CC":        is_cc,
+        "_CC_STANDALONE": cc_standalone,
         "_PREM":         prem,
         "_MULT":         mult,
         "_IV":           iv_used,
@@ -347,8 +357,9 @@ styled_book = (disp_book.style
     .format(fmt, na_rep="—"))
 
 st.dataframe(styled_book, use_container_width=True, hide_index=True)
-st.caption("DELTA: short put = +d | naked short call = -d | covered call = 1-d (stock + short call) | long stock = +1  |  "
-           "IV from live option chain, fallback 35%  |  COVERED CALL UNREAL PNL = option leg only (stock basis not tracked)")
+st.caption("DELTA: short put = +d | short call = -d | long stock = +1 | covered call = -d when shares are a separate "
+           "LONG STOCK row, else 1-d (combined)  |  IV from live option chain, fallback 35%  |  "
+           "COVERED CALL UNREAL PNL = option leg only")
 st.caption("PROFIT-TAKE PROCEDURE (MANUAL §5.1): GTC BUY-TO-CLOSE AT 50% ON ENTRY → CLOSE 1/2 AT 50%, 1/4 AT 75%, REST BY 90% OR MANAGE-BY DATE (1M @ 21 DTE, 3M @ 45 DTE). "
            "YIELD LEFT = ANNUALIZED YIELD OF PREMIUM STILL ON THE TABLE — IF < 15% AFTER THE 50% TIER, CLOSE AND REDEPLOY.")
 
@@ -406,8 +417,9 @@ def book_pnl_at(shock: float, mode: str) -> float:
         if not k:
             continue
 
-        # Covered call: add the owned-stock leg (100 sh per contract, from current spot)
-        if r["_IS_CC"]:
+        # Covered call: add the owned-stock leg ONLY when the stock isn't logged
+        # as its own Long Stock row (otherwise that row already carries it)
+        if r["_IS_CC"] and r["_CC_STANDALONE"]:
             total += (s - spot_r) * 100 * ctrs
 
         kind = "put" if r["_IS_PUT"] else "call"
@@ -533,7 +545,7 @@ for _, r in book.iterrows():
         continue
     if r["_IS_STOCK"]:
         stock_val += spot_r * r["CONTRACTS"]
-    elif r["_IS_CC"]:
+    elif r["_IS_CC"] and r["_CC_STANDALONE"]:
         stock_val += spot_r * 100 * r["CONTRACTS"]
 stock_pct = stock_val / TOTAL_CAPITAL if TOTAL_CAPITAL else 0
 checks.append(("STOCK INVENTORY", stock_pct <= MAX_STOCK_INV,
