@@ -340,20 +340,25 @@ else:
     row = trades[trades["ID"] == mod_id].iloc[0]
     is_stock_row = str(row["STRATEGY"]) == "Long Stock"
 
-    mc1, mc2, mc3, mc4 = st.columns(4)
-    m_strike = mc1.number_input("SHORT STRIKE", min_value=0.0, step=0.50,
-                                value=float(row["SHORT STRIKE"]) if pd.notna(row["SHORT STRIKE"]) else 0.0,
-                                disabled=is_stock_row, key="mod_strike")
-    m_ctrs   = mc2.number_input("CONTRACTS / SHARES", min_value=1,
-                                value=int(row["CONTRACTS"]) if pd.notna(row["CONTRACTS"]) else 1, key="mod_ctrs")
-    m_prem   = mc3.number_input("PREMIUM / ENTRY", min_value=0.0, step=0.01,
-                                value=float(row["PREMIUM / CREDIT"]) if pd.notna(row["PREMIUM / CREDIT"]) else 0.0,
-                                key="mod_prem")
+    # When the selected trade changes, refresh the input fields to ITS values
+    # (widgets with keys otherwise keep the previous trade's numbers).
     try:
         _cur_exp = datetime.date.fromisoformat(str(row["EXPIRY"]))
     except Exception:
         _cur_exp = datetime.date.today() + datetime.timedelta(days=35)
-    m_exp    = mc4.date_input("EXPIRY", _cur_exp, disabled=is_stock_row, key="mod_exp")
+    if st.session_state.get("mod_last_id") != mod_id:
+        st.session_state["mod_strike"] = float(row["SHORT STRIKE"]) if pd.notna(row["SHORT STRIKE"]) else 0.0
+        st.session_state["mod_ctrs"]   = int(row["CONTRACTS"]) if pd.notna(row["CONTRACTS"]) else 1
+        st.session_state["mod_prem"]   = float(row["PREMIUM / CREDIT"]) if pd.notna(row["PREMIUM / CREDIT"]) else 0.0
+        st.session_state["mod_exp"]    = _cur_exp
+        st.session_state["mod_last_id"] = mod_id
+
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    m_strike = mc1.number_input("SHORT STRIKE", min_value=0.0, step=0.50,
+                                disabled=is_stock_row, key="mod_strike")
+    m_ctrs   = mc2.number_input("CONTRACTS / SHARES", min_value=1, step=1, key="mod_ctrs")
+    m_prem   = mc3.number_input("PREMIUM / ENTRY", min_value=0.0, step=0.01, key="mod_prem")
+    m_exp    = mc4.date_input("EXPIRY", disabled=is_stock_row, key="mod_exp")
 
     cu1, cu2, _ = st.columns([2, 2, 6])
     if cu1.button("UPDATE TRADE", type="primary", use_container_width=True):
