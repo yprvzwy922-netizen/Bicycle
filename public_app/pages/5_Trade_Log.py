@@ -366,7 +366,7 @@ else:
         trades.at[idx, "CONTRACTS"]        = m_ctrs
         trades.at[idx, "PREMIUM / CREDIT"] = m_prem
         if not is_stock_row:
-            trades.at[idx, "SHORT STRIKE"] = m_strike if m_strike > 0 else None
+            trades.at[idx, "SHORT STRIKE"] = float(m_strike) if m_strike > 0 else float("nan")
             trades.at[idx, "EXPIRY"]       = m_exp.isoformat()
             try:
                 d_open = datetime.date.fromisoformat(str(row["DATE OPENED"]))
