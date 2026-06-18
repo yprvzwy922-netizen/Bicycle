@@ -2,8 +2,8 @@ name: Daily portfolio snapshot
 
 on:
   schedule:
-    # 21:10 UTC weekdays = after US market close year-round
-    - cron: "10 21 * * 1-5"
+    # 21:40 UTC weekdays = after US market close year-round
+      - cron: "40 21 * * 1-5"
   workflow_dispatch: {}
 
 jobs:
