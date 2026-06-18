@@ -1,0 +1,32 @@
+name: Daily portfolio snapshot
+
+on:
+  schedule:
+    - cron: "10 21 * * 1-5"
+  workflow_dispatch: {}
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install yfinance pandas numpy requests
+      - name: Daily NAV + portfolio snapshot
+        run: python scripts/daily_snapshot.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      - name: Position alerts (email)
+        run: python scripts/alerts.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_EMAIL_TO:   ${{ secrets.ALERT_EMAIL_TO }}
+          ALERT_SMTP_HOST:  ${{ secrets.ALERT_SMTP_HOST }}
+          ALERT_SMTP_PORT:  ${{ secrets.ALERT_SMTP_PORT }}
+          ALERT_SMTP_USER:  ${{ secrets.ALERT_SMTP_USER }}
+          ALERT_SMTP_PASS:  ${{ secrets.ALERT_SMTP_PASS }}
