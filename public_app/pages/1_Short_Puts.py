@@ -88,7 +88,7 @@ for i, w in enumerate(wl):
             "PRICE":         round(spot, 2),
             "TREND":         trend,
             "IV RANK":       round(ivr, 2),
-            "EARN DAYS":     earn if earn is not None else "—",
+            "EARN DAYS":     float(earn) if earn is not None else np.nan,
             "EARN WARN":     earn_warn,
             "BAND":          w["delta_band"],
             "1M STRIKE":     p1.get("strike"),
@@ -196,6 +196,7 @@ styled = (disp.style
     .format({
         "PRICE":     "${:.2f}",
         "IV RANK":   "{:.0%}",
+        "EARN DAYS": "{:.0f}",
         "1M STRIKE": "${:.2f}", "3M STRIKE": "${:.2f}",
         "1M DELTA":  "{:.3f}",  "3M DELTA":  "{:.3f}",
         "1M IV":     "{:.1%}",

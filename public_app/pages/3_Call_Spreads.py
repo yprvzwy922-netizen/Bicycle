@@ -77,7 +77,7 @@ for i, w in enumerate(wl):
             "PRICE":        round(spot, 2),
             "TREND":        trend,
             "IV RANK":      round(ivr, 2),
-            "EARN DAYS":    earn if earn is not None else "—",
+            "EARN DAYS":    float(earn) if earn is not None else np.nan,
             "SHORT STRIKE": cs.get("short_strike"),
             "LONG STRIKE":  cs.get("long_strike"),
             "SHORT DELTA":  cs.get("short_delta"),
@@ -164,6 +164,7 @@ styled = (disp.style
     .format({
         "PRICE":        "${:.2f}",
         "IV RANK":      "{:.0%}",
+        "EARN DAYS":    "{:.0f}",
         "SHORT STRIKE": "${:.2f}",
         "LONG STRIKE":  "${:.2f}",
         "SHORT DELTA":  "{:.3f}",

@@ -150,8 +150,10 @@ if db.configured():
         fs["nav"]         = pd.to_numeric(fs["nav"], errors="coerce")
         fs["contributed"] = pd.to_numeric(fs["contributed"], errors="coerce").fillna(0)
         fs["nav_per_unit"]= pd.to_numeric(fs["nav_per_unit"], errors="coerce")
-        # Daily cash infusion = change in cumulative contributions
-        fs["infusion"] = fs["contributed"].diff().fillna(fs["contributed"]).clip(lower=0)
+        # Daily cash infusion = change in cumulative contributions.
+        # First snapshot has no "previous day", so its infusion is 0 (the starting
+        # capital is not a same-day jump — that would spike the line up from $0).
+        fs["infusion"] = fs["contributed"].diff().fillna(0).clip(lower=0)
 
         st.markdown("---")
         st.markdown("### FUND VALUE ($) — HISTORY")

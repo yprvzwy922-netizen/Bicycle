@@ -88,7 +88,7 @@ for i, tkr in enumerate(tickers):
             "PRICE":      round(spot, 2),
             "TREND":      trend,
             "IV RANK":    round(ivr, 2),
-            "EARN DAYS":  earn if earn is not None else "—",
+            "EARN DAYS":  float(earn) if earn is not None else np.nan,
             "STRIKE":     cc.get("strike"),
             "DELTA":      cc.get("delta"),
             "TGT DELTA":  round(tgt, 2),
@@ -150,7 +150,7 @@ styled = (disp.style
     .map(ssc,   subset=["SCORE"])
     .map(strk,  subset=["TRACK"])
     .format({
-        "PRICE":"${:.2f}", "IV RANK":"{:.0%}", "STRIKE":"${:.2f}",
+        "PRICE":"${:.2f}", "IV RANK":"{:.0%}", "EARN DAYS":"{:.0f}", "STRIKE":"${:.2f}",
         "DELTA":"{:.3f}", "TGT DELTA":"{:.2f}", "IV":"{:.1%}", "PREMIUM":"${:.2f}",
         "ANN YIELD":"{:.1%}", "UPSIDE CAP":"{:.1%}", "SPREAD":"{:.1%}", "SCORE":"{:.0f}",
     }, na_rep="—"))
