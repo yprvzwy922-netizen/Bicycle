@@ -154,6 +154,27 @@ def upsert_watchlist_item(item: dict):
           prefer="resolution=merge-duplicates,return=minimal")
     _watchlist_rows.clear()
 
+def sync_missing_watchlist(defaults) -> int:
+    """Add default names not already in the watchlist (non-destructive — never
+    overwrites your existing rows). Returns how many were added."""
+    have = {w["ticker"] for w in load_watchlist()} if configured() else \
+           set(st.session_state.get("watchlist", {}).keys())
+    missing = [w for w in defaults if w["ticker"] not in have]
+    if not missing:
+        return 0
+    if configured():
+        _rest("POST", "watchlist", json=[{
+            "ticker": w["ticker"], "company": w["company"], "sector": w["sector"],
+            "bucket": w["bucket"], "conviction": w["conviction"],
+            "delta_band": w["delta_band"]} for w in missing],
+            prefer="resolution=merge-duplicates,return=minimal")
+        _watchlist_rows.clear()
+    else:
+        wl = st.session_state.setdefault("watchlist", {})
+        for w in missing:
+            wl[w["ticker"]] = w
+    return len(missing)
+
 def delete_watchlist_item(ticker: str):
     _rest("DELETE", "watchlist", params={"ticker": f"eq.{ticker.upper()}"},
           prefer="return=minimal")

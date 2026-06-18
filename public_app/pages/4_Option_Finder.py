@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
 import ticket
+import db
 import bbg_style
 from shared import (get_watchlist, add_to_watchlist, remove_from_watchlist,
                     fetch_spot, fetch_chain, bs_put_delta, bs_call_delta,
@@ -131,6 +132,13 @@ with st.expander("MANAGE WATCHLIST (add / remove)"):
             remove_from_watchlist(rem_tick)
             st.success(f"{rem_tick} removed.")
             st.rerun()
+    st.markdown("---")
+    st.caption("Pull in any newly-added default names (non-destructive — won't touch your edits).")
+    if st.button("SYNC DEFAULT NAMES → WATCHLIST", use_container_width=True):
+        from shared import DEFAULT_WATCHLIST
+        n = db.sync_missing_watchlist(DEFAULT_WATCHLIST)
+        st.success(f"Added {n} new name(s)." if n else "Already up to date.")
+        st.rerun()
 
 # ── Roll calculator sidebar ───────────────────────────────────────────────────
 with st.sidebar:

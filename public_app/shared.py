@@ -36,6 +36,54 @@ DEFAULT_WATCHLIST = [
     {"ticker": "HIMS",  "company": "Hims & Hers",             "sector": "Healthcare",           "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
     {"ticker": "VKTX",  "company": "Viking Therapeutics",     "sector": "Healthcare",           "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
     {"ticker": "IBRX",  "company": "ImmunityBio",             "sector": "Healthcare",           "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    # ── Added 2026-06-18 from broker "Cash secured Puts" list ──────────────────
+    # AI compute / semis
+    {"ticker": "AVGO",  "company": "Broadcom",                "sector": "Semiconductors",       "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
+    {"ticker": "MRVL",  "company": "Marvell Technology",      "sector": "Semiconductors",       "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "AXTI",  "company": "AXT Inc",                 "sector": "Semiconductors",       "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
+    # Data centers / AI
+    {"ticker": "PENG",  "company": "Penguin Solutions",       "sector": "Data Centers & AI",    "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "NUAI",  "company": "NUAI (VERIFY)",           "sector": "Data Centers & AI",    "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    {"ticker": "OSS",   "company": "One Stop Systems",        "sector": "Data Centers & AI",    "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    # Power / energy
+    {"ticker": "VST",   "company": "Vistra",                  "sector": "Energy & Power",       "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
+    {"ticker": "UUUU",  "company": "Energy Fuels (uranium)",  "sector": "Energy & Power",       "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
+    {"ticker": "FLNC",  "company": "Fluence Energy",          "sector": "Energy & Power",       "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
+    {"ticker": "TE",    "company": "T1 Energy (VERIFY)",      "sector": "Energy & Power",       "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    # Big tech / software
+    {"ticker": "AAPL",  "company": "Apple",                   "sector": "Technology",           "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
+    {"ticker": "NOW",   "company": "ServiceNow (VERIFY PX)",  "sector": "Technology",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "RDDT",  "company": "Reddit",                  "sector": "Technology",           "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "ZETA",  "company": "Zeta Global",             "sector": "Technology",           "bucket": "Growth",      "conviction": 2, "delta_band": "Income"},
+    {"ticker": "ADEA",  "company": "Adeia",                   "sector": "Technology",           "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "MGNI",  "company": "Magnite",                 "sector": "Technology",           "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
+    {"ticker": "OPEN",  "company": "Opendoor Technologies",   "sector": "Technology",           "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    {"ticker": "ONDS",  "company": "Ondas Holdings",          "sector": "Technology",           "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    {"ticker": "OUST",  "company": "Ouster (lidar)",          "sector": "Technology",           "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    {"ticker": "KEEL",  "company": "KEEL (VERIFY)",           "sector": "Technology",           "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    # Quantum (binary, very high IV)
+    {"ticker": "QBTS",  "company": "D-Wave Quantum",          "sector": "Quantum",              "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
+    {"ticker": "RGTI",  "company": "Rigetti Computing",       "sector": "Quantum",              "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
+    {"ticker": "QUBT",  "company": "Quantum Computing Inc",   "sector": "Quantum",              "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    # Space & defense
+    {"ticker": "KTOS",  "company": "Kratos Defense",          "sector": "Space & Defense",      "bucket": "Growth",      "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "RKLB",  "company": "Rocket Lab",              "sector": "Space & Defense",      "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "ASTS",  "company": "AST SpaceMobile",         "sector": "Space & Defense",      "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
+    {"ticker": "SPCX",  "company": "SPCX (VERIFY)",           "sector": "Space & Defense",      "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    # Financials
+    {"ticker": "ICE",   "company": "Intercontinental Exch.",  "sector": "Financials",           "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
+    {"ticker": "PLMR",  "company": "Palomar Holdings",        "sector": "Financials",           "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "INTR",  "company": "Inter & Co",              "sector": "Financials",           "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "PGY",   "company": "Pagaya Technologies",     "sector": "Financials",           "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
+    {"ticker": "QXO",   "company": "QXO Inc",                 "sector": "Industrials",          "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    # Healthcare
+    {"ticker": "HALO",  "company": "Halozyme Therapeutics",   "sector": "Healthcare",           "bucket": "Growth",      "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "OSCR",  "company": "Oscar Health",            "sector": "Healthcare",           "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "ARDX",  "company": "Ardelyx",                 "sector": "Healthcare",           "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    # Crypto & digital assets (ETFs/proxies — selling puts = bullish crypto)
+    {"ticker": "IBIT",  "company": "iShares Bitcoin Trust",   "sector": "Crypto & Digital",     "bucket": "Speculative", "conviction": 3, "delta_band": "Income"},
+    {"ticker": "ETHA",  "company": "iShares Ethereum Trust",  "sector": "Crypto & Digital",     "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
+    {"ticker": "GLXY",  "company": "Galaxy Digital",          "sector": "Crypto & Digital",     "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
 ]
 
 SECTORS = sorted(set(w["sector"] for w in DEFAULT_WATCHLIST))
