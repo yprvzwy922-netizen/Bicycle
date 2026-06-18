@@ -43,7 +43,7 @@ DEFAULT_WATCHLIST = [
     {"ticker": "AXTI",  "company": "AXT Inc",                 "sector": "Semiconductors",       "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
     # Data centers / AI
     {"ticker": "PENG",  "company": "Penguin Solutions",       "sector": "Data Centers & AI",    "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
-    {"ticker": "NUAI",  "company": "NUAI (VERIFY)",           "sector": "Data Centers & AI",    "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    {"ticker": "NUAI",  "company": "New Era Energy & Digital", "sector": "Data Centers & AI",    "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
     {"ticker": "OSS",   "company": "One Stop Systems",        "sector": "Data Centers & AI",    "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
     # Power / energy
     {"ticker": "VST",   "company": "Vistra",                  "sector": "Energy & Power",       "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
@@ -69,7 +69,7 @@ DEFAULT_WATCHLIST = [
     {"ticker": "KTOS",  "company": "Kratos Defense",          "sector": "Space & Defense",      "bucket": "Growth",      "conviction": 4, "delta_band": "Wheel"},
     {"ticker": "RKLB",  "company": "Rocket Lab",              "sector": "Space & Defense",      "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
     {"ticker": "ASTS",  "company": "AST SpaceMobile",         "sector": "Space & Defense",      "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
-    {"ticker": "SPCX",  "company": "SPCX (VERIFY)",           "sector": "Space & Defense",      "bucket": "Speculative", "conviction": 1, "delta_band": "Income"},
+    {"ticker": "SPCX",  "company": "SpaceX",                  "sector": "Space & Defense",      "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
     # Financials
     {"ticker": "ICE",   "company": "Intercontinental Exch.",  "sector": "Financials",           "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
     {"ticker": "PLMR",  "company": "Palomar Holdings",        "sector": "Financials",           "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
