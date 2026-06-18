@@ -324,6 +324,67 @@ if not open_trades.empty:
 else:
     st.caption("No open trades.")
 
+# ── Modify / cancel a trade ───────────────────────────────────────────────────
+st.markdown("---")
+st.markdown("### MODIFY / CANCEL A TRADE")
+trades = st.session_state["trades"]
+
+if trades.empty:
+    st.caption("No trades to modify.")
+else:
+    ids_all = pd.to_numeric(trades["ID"], errors="coerce").dropna().astype(int).tolist()
+    def _lbl(i):
+        r = trades[trades["ID"] == i].iloc[0]
+        return f"#{i}  {r['TICKER']}  {r['STRATEGY']}  K{r['SHORT STRIKE']}  {r['EXPIRY']}  [{r['STATUS']}]"
+    mod_id = st.selectbox("SELECT TRADE", ids_all, format_func=_lbl, key="mod_id")
+    row = trades[trades["ID"] == mod_id].iloc[0]
+    is_stock_row = str(row["STRATEGY"]) == "Long Stock"
+
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    m_strike = mc1.number_input("SHORT STRIKE", min_value=0.0, step=0.50,
+                                value=float(row["SHORT STRIKE"]) if pd.notna(row["SHORT STRIKE"]) else 0.0,
+                                disabled=is_stock_row, key="mod_strike")
+    m_ctrs   = mc2.number_input("CONTRACTS / SHARES", min_value=1,
+                                value=int(row["CONTRACTS"]) if pd.notna(row["CONTRACTS"]) else 1, key="mod_ctrs")
+    m_prem   = mc3.number_input("PREMIUM / ENTRY", min_value=0.0, step=0.01,
+                                value=float(row["PREMIUM / CREDIT"]) if pd.notna(row["PREMIUM / CREDIT"]) else 0.0,
+                                key="mod_prem")
+    try:
+        _cur_exp = datetime.date.fromisoformat(str(row["EXPIRY"]))
+    except Exception:
+        _cur_exp = datetime.date.today() + datetime.timedelta(days=35)
+    m_exp    = mc4.date_input("EXPIRY", _cur_exp, disabled=is_stock_row, key="mod_exp")
+
+    cu1, cu2, _ = st.columns([2, 2, 6])
+    if cu1.button("UPDATE TRADE", type="primary", use_container_width=True):
+        idx = trades[trades["ID"] == mod_id].index[0]
+        trades.at[idx, "CONTRACTS"]        = m_ctrs
+        trades.at[idx, "PREMIUM / CREDIT"] = m_prem
+        if not is_stock_row:
+            trades.at[idx, "SHORT STRIKE"] = m_strike if m_strike > 0 else None
+            trades.at[idx, "EXPIRY"]       = m_exp.isoformat()
+            try:
+                d_open = datetime.date.fromisoformat(str(row["DATE OPENED"]))
+            except Exception:
+                d_open = datetime.date.today()
+            trades.at[idx, "DTE OPEN"]     = max((m_exp - d_open).days, 0)
+            # Recompute cash/max-loss for single-leg short puts
+            if str(row["STRATEGY"]) in ("Short Put", "Cash-Secured Put (Wheel)") and m_strike > 0:
+                trades.at[idx, "CASH SECURED"] = m_strike * 100 * m_ctrs
+                trades.at[idx, "MAX LOSS"]     = m_strike * 100 * m_ctrs
+        else:
+            trades.at[idx, "CASH SECURED"] = m_prem * m_ctrs
+            trades.at[idx, "MAX LOSS"]     = m_prem * m_ctrs
+        db.save_trades_df(trades)
+        st.success(f"Trade #{mod_id} updated.")
+        st.rerun()
+
+    if cu2.button("DELETE TRADE", use_container_width=True):
+        remaining = trades[trades["ID"] != mod_id].reset_index(drop=True)
+        db.save_trades_df(remaining)
+        st.success(f"Trade #{mod_id} deleted.")
+        st.rerun()
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 st.markdown("---")
 trades = st.session_state["trades"]
