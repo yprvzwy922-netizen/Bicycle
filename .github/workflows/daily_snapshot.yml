@@ -2,7 +2,7 @@ name: Daily portfolio snapshot
 
 on:
   schedule:
-    - cron: "10 21 * * 1-5"
+    - cron: "40 21 * * 1-5"
   workflow_dispatch: {}
 
 jobs:
