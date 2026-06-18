@@ -184,7 +184,7 @@ if db.configured():
             font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
             legend=dict(orientation="h", y=1.12),
             margin=dict(l=40, r=20, t=30, b=40), height=360,
-            xaxis=dict(gridcolor="#1e1e1e", type="date", tickformat="%b %d"),
+            xaxis=dict(gridcolor="#1e1e1e", type="category"),
             yaxis=dict(gridcolor="#1e1e1e", tickprefix="$"))
         st.plotly_chart(fig, use_container_width=True)
         st.caption("Cash infusions show as a vertical JUMP on their day (orange = money in). "
@@ -201,7 +201,7 @@ if db.configured():
             paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
             font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
             margin=dict(l=40, r=20, t=20, b=40), height=320, showlegend=False,
-            xaxis=dict(gridcolor="#1e1e1e", type="date", tickformat="%b %d"),
+            xaxis=dict(gridcolor="#1e1e1e", type="category"),
             yaxis=dict(gridcolor="#1e1e1e", tickprefix="$"))
         st.plotly_chart(fig2, use_container_width=True)
     else:
