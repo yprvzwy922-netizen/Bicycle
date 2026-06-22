@@ -36,17 +36,25 @@ def rest(method, table, params=None, json=None, prefer=None):
     return r.json() if r.text else None
 
 def last_trading_day():
-    """The most recent COMPLETED US trading session (US/Eastern), so the snapshot
-    is dated correctly no matter when GitHub actually runs the job:
-      • weekday after 16:00 ET  -> today
-      • weekday before close    -> previous weekday (session not done)
-      • weekend                 -> roll back to Friday
-    (Holidays aren't special-cased; a holiday just re-stamps the prior close.)"""
+    """Most recent COMPLETED US trading session, dated correctly no matter when
+    GitHub actually runs the job. Primary method derives it from real market
+    data (SPY's last daily bar) — that handles weekends AND holidays for free.
+    Calendar fallback (weekends only) if the data fetch fails."""
     now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
+    try:
+        h = yf.Ticker("SPY").history(period="7d")
+        if not h.empty:
+            last = h.index[-1].date()
+            # If run intraday before close, today's forming bar isn't "complete"
+            if last == now_et.date() and now_et.time() < datetime.time(16, 0) and len(h) > 1:
+                last = h.index[-2].date()
+            return last
+    except Exception:
+        pass
     d = now_et.date()
     if now_et.weekday() < 5 and now_et.time() < datetime.time(16, 0):
         d -= datetime.timedelta(days=1)
-    while d.weekday() >= 5:        # Sat=5, Sun=6
+    while d.weekday() >= 5:
         d -= datetime.timedelta(days=1)
     return d
 
