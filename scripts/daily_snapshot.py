@@ -11,6 +11,7 @@ Self-contained on purpose — no streamlit import (shared.py needs a Streamlit r
 import datetime
 import os
 import sys
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -34,7 +35,23 @@ def rest(method, table, params=None, json=None, prefer=None):
     r.raise_for_status()
     return r.json() if r.text else None
 
-TODAY = datetime.date.today().isoformat()
+def last_trading_day():
+    """The most recent COMPLETED US trading session (US/Eastern), so the snapshot
+    is dated correctly no matter when GitHub actually runs the job:
+      • weekday after 16:00 ET  -> today
+      • weekday before close    -> previous weekday (session not done)
+      • weekend                 -> roll back to Friday
+    (Holidays aren't special-cased; a holiday just re-stamps the prior close.)"""
+    now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
+    d = now_et.date()
+    if now_et.weekday() < 5 and now_et.time() < datetime.time(16, 0):
+        d -= datetime.timedelta(days=1)
+    while d.weekday() >= 5:        # Sat=5, Sun=6
+        d -= datetime.timedelta(days=1)
+    return d
+
+TODAY = last_trading_day().isoformat()
+print(f"snapshot date (last trading day, ET): {TODAY}")
 
 # ── Per-ticker snapshots ──────────────────────────────────────────────────────
 wl = rest("GET", "watchlist", params={"select": "ticker"}) or []
