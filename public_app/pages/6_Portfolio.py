@@ -373,7 +373,7 @@ fmt = {
     "% MAX PROFIT":  "{:.0%}",
     "YIELD LEFT":    "{:.1%}",
 }
-disp_book = book[[c for c in book.columns if not c.startswith("_")]]
+disp_book = book[[c for c in book.columns if not c.startswith("_") and c != "ID"]]
 styled_book = (disp_book.style
     .map(color_dte,        subset=["DTE LEFT"])
     .map(color_pnl,        subset=["UNREAL PNL"])
@@ -382,7 +382,8 @@ styled_book = (disp_book.style
     .map(color_action,     subset=["ACTION"])
     .format(fmt, na_rep="—"))
 
-st.dataframe(styled_book, use_container_width=True, hide_index=True)
+st.dataframe(styled_book, use_container_width=True, hide_index=True,
+             column_config={"TICKER": st.column_config.Column(pinned=True)})
 st.caption("DELTA: short put = +d | short call = -d | long stock = +1 | covered call = -d when shares are a separate "
            "LONG STOCK row, else 1-d (combined)  |  IV from live option chain, fallback 35%  |  "
            "COVERED CALL UNREAL PNL = option leg only")
