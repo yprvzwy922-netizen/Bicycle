@@ -295,40 +295,17 @@ else:
                 + ("  (no contributions logged yet — add them on the Fund page to use Auto)"
                    if CAP_MODE.startswith("Auto") else ""))
 
-# ── Portfolio KPIs ────────────────────────────────────────────────────────────
-total_cash     = book["CASH AT RISK"].sum()
+# ── Portfolio KPIs (single row, cash included) ────────────────────────────────
+total_deployed = book["CASH AT RISK"].sum()
 total_max_loss = book["MAX LOSS"].sum()
-pct_deployed   = total_cash / TOTAL_CAPITAL if TOTAL_CAPITAL else 0
+pct_deployed   = total_deployed / TOTAL_CAPITAL if TOTAL_CAPITAL else 0
 cash_buffer    = 1 - pct_deployed
-total_ddelta   = pd.to_numeric(book["$ DELTA"],    errors="coerce").sum()
-# Premium received on open short-option positions (excludes long legs & stock)
+total_ddelta   = pd.to_numeric(book["$ DELTA"], errors="coerce").sum()   # used by risk checks
 short_opt      = book[(~book["_IS_STOCK"]) & (book["_IS_SHORT"])]
 total_premium  = (pd.to_numeric(short_opt["PREM RECEIVED"], errors="coerce") *
                   pd.to_numeric(short_opt["CONTRACTS"], errors="coerce") * 100).sum()
 
-k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
-k1.metric("TOTAL CAPITAL",        f"${TOTAL_CAPITAL:,.0f}",
-          help="The base all risk caps are measured against. " + cap_note)
-k2.metric("OPEN POSITIONS",       len(book))
-k3.metric("CAPITAL DEPLOYED",     f"${total_cash:,.0f}",    f"{pct_deployed:.1%}")
-k4.metric("PREMIUM RECEIVED",     f"${total_premium:,.0f}",
-          help="Σ premium × 100 × contracts on open short options (credit collected up front)")
-k5.metric("TOTAL MAX LOSS",       f"${total_max_loss:,.0f}")
-k6.metric("NET $ DELTA",          f"${total_ddelta:,.0f}",
-          help="Σ delta × contracts × multiplier × spot  |  +ve = net bullish")
-k7.metric("UNREAL PNL (MID)",     f"${total_unreal:,.0f}",
-          help="(Premium received − current mid) × 100 × contracts")
-
-st.caption(f"CAPITAL BASE — {cap_note}")
-st.caption("CAPITAL DEPLOYED: cash-secured puts use strike×100; spreads use their max loss (defined risk); "
-           "covered calls count $0 (stock-secured, not cash) so they don't inflate deployment.")
-
-# ── Cash & dry powder ─────────────────────────────────────────────────────────
-# Account is all cash (mostly T-bills); some is reserved to secure open puts.
-#   Total cash = fund value − stock you hold + the premium cash you've collected
-#               (= NAV + cost-to-close open shorts − long-stock market value)
-#   Reserved   = collateral on open short puts (Capital Deployed, excl. stock)
-#   Available  = dry powder for new puts
+# Cash & dry powder: total cash = NAV − stock held + cost-to-close open shorts
 stock_mv = 0.0
 short_liab = 0.0
 for _, r in book.iterrows():
@@ -340,18 +317,27 @@ for _, r in book.iterrows():
         cm = r["CURRENT MID"]
         if cm is not None and not (isinstance(cm, float) and np.isnan(cm)):
             short_liab += cm * 100 * r["CONTRACTS"]
-total_cash    = TOTAL_CAPITAL - stock_mv + short_liab
-reserved_cash = book.loc[~book["_IS_STOCK"], "CASH AT RISK"].sum()
-available_cash = total_cash - reserved_cash
+acct_cash      = TOTAL_CAPITAL - stock_mv + short_liab
+reserved_cash  = book.loc[~book["_IS_STOCK"], "CASH AT RISK"].sum()
+available_cash = acct_cash - reserved_cash
 
-st.markdown("### CASH & DRY POWDER")
-cc1, cc2, cc3 = st.columns(3)
-cc1.metric("TOTAL CASH (≈ T-BILLS)", f"${total_cash:,.0f}",
-           help="Fund value − stock held + premium cash collected. The actual cash in the account.")
-cc2.metric("RESERVED (SECURING PUTS)", f"${reserved_cash:,.0f}",
-           help="Collateral tied up by open short puts (= capital deployed, excluding stock).")
-cc3.metric("AVAILABLE CASH", f"${available_cash:,.0f}",
-           help="Dry powder free to deploy into new cash-secured puts.")
+k1, k2, k3, k4, k5, k6, k7, k8 = st.columns(8)
+k1.metric("TOTAL CAPITAL",     f"${TOTAL_CAPITAL:,.0f}",
+          help="The base all risk caps are measured against. " + cap_note)
+k2.metric("OPEN POSITIONS",    len(book))
+k3.metric("TOTAL CASH (T-BILLS)", f"${acct_cash:,.0f}",
+          help="Fund value − stock held + premium cash collected. The actual cash in the account.")
+k4.metric("CAPITAL DEPLOYED",  f"${total_deployed:,.0f}", f"{pct_deployed:.1%}",
+          help="Collateral securing open puts (cash-secured = strike×100; spreads = max loss; covered calls = $0).")
+k5.metric("AVAILABLE CASH",    f"${available_cash:,.0f}",
+          help="Dry powder free to deploy into new cash-secured puts (total cash − collateral reserved).")
+k6.metric("PREMIUM RECEIVED",  f"${total_premium:,.0f}",
+          help="Σ premium × 100 × contracts on open short options (credit collected up front)")
+k7.metric("TOTAL MAX LOSS",    f"${total_max_loss:,.0f}")
+k8.metric("UNREAL PNL (MID)",  f"${total_unreal:,.0f}",
+          help="(Premium received − current mid) × 100 × contracts")
+
+st.caption(f"CAPITAL BASE — {cap_note}  |  NET $ DELTA: ${total_ddelta:,.0f} (in the delta tables below)")
 
 st.markdown("---")
 
