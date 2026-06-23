@@ -45,6 +45,7 @@ with st.sidebar:
     MAX_SINGLE_NAME = st.slider("MAX SINGLE NAME %",      5,  30, 10) / 100   # <=10% per name
     MAX_PER_TRADE   = st.slider("MAX SINGLE TRADE %",     1,  10,  3) / 100   # <=2-3% per trade
     MAX_SPECULATIVE = st.slider("MAX SPECULATIVE %",     10,  50, 40) / 100   # <=40% spec bucket
+    MIN_CORE        = st.slider("MIN CORE %",             0,  70, 40) / 100   # backbone target
     MAX_SECTOR      = st.slider("MAX SECTOR %",          10,  50, 30) / 100   # <=30% per sector
     MAX_STOCK_INV   = st.slider("MAX STOCK INVENTORY %", 10,  60, 40) / 100   # manual §8.3 ceiling
     MAX_DEPLOYED    = st.slider("MAX % DEPLOYED",        50, 100, 100) / 100  # 100% invested mandate
@@ -565,6 +566,41 @@ st.dataframe(
     use_container_width=True, hide_index=True
 )
 
+# ── Exposure by bucket (conviction / risk tier) ───────────────────────────────
+st.markdown("### EXPOSURE BY BUCKET")
+_ORDER = {"Core": 0, "Growth": 1, "Speculative": 2}
+by_bucket = book.groupby("BUCKET").agg(
+    CASH=("CASH AT RISK", "sum"),
+    DOLLAR_DELTA=("$ DELTA", "sum"),
+    POSITIONS=("ID", "count"),
+).reset_index()
+by_bucket["% OF CAPITAL"] = by_bucket["CASH"] / TOTAL_CAPITAL
+def _bucket_target(b):
+    if b == "Core":        return f"≥ {MIN_CORE:.0%}"
+    if b == "Speculative": return f"≤ {MAX_SPECULATIVE:.0%}"
+    return "residual"
+def _bucket_status(row):
+    b, p = row["BUCKET"], row["% OF CAPITAL"]
+    if b == "Core":        return "OK" if p >= MIN_CORE else "UNDER TARGET"
+    if b == "Speculative": return "OK" if p <= MAX_SPECULATIVE else "OVER LIMIT"
+    return "OK"
+by_bucket["TARGET"] = by_bucket["BUCKET"].map(_bucket_target)
+by_bucket["STATUS"] = by_bucket.apply(_bucket_status, axis=1)
+by_bucket = by_bucket.sort_values("BUCKET", key=lambda s: s.map(lambda b: _ORDER.get(b, 9)))
+by_bucket = by_bucket[["BUCKET", "POSITIONS", "CASH", "% OF CAPITAL", "TARGET", "STATUS", "DOLLAR_DELTA"]]
+
+def _status_color(v):
+    return "color:#00e676;font-weight:600" if v == "OK" else "color:#ff4444;font-weight:600"
+
+st.dataframe(
+    by_bucket.style
+    .map(_status_color, subset=["STATUS"])
+    .format({"CASH": "${:,.0f}", "% OF CAPITAL": "{:.1%}", "DOLLAR_DELTA": "${:,.0f}"}, na_rep="—"),
+    use_container_width=True, hide_index=True
+)
+st.caption(f"Targets: CORE ≥ {MIN_CORE:.0%} (backbone you want to own) · SPECULATIVE ≤ {MAX_SPECULATIVE:.0%} "
+           f"(binary names, keep small) · GROWTH = residual. % measured against total capital.")
+
 st.markdown("---")
 
 # ── Risk limit gauges ─────────────────────────────────────────────────────────
@@ -572,6 +608,8 @@ st.markdown("### RISK LIMITS — PASS / FAIL")
 
 spec_cash = book[book["BUCKET"] == "Speculative"]["CASH AT RISK"].sum()
 spec_pct  = spec_cash / TOTAL_CAPITAL
+core_cash = book[book["BUCKET"] == "Core"]["CASH AT RISK"].sum()
+core_pct  = core_cash / TOTAL_CAPITAL
 
 checks = [
     ("% DEPLOYED",         pct_deployed <= MAX_DEPLOYED,
@@ -580,6 +618,9 @@ checks = [
     ("CASH BUFFER",        cash_buffer >= MIN_CASH_BUFFER,
      f"{cash_buffer:.1%}  vs  {MIN_CASH_BUFFER:.0%} minimum",
      cash_buffer, MIN_CASH_BUFFER),
+    ("CORE BUCKET",        core_pct >= MIN_CORE,
+     f"{core_pct:.1%}  vs  {MIN_CORE:.0%} minimum",
+     core_pct, MIN_CORE),
     ("SPECULATIVE BUCKET", spec_pct <= MAX_SPECULATIVE,
      f"{spec_pct:.1%}  vs  {MAX_SPECULATIVE:.0%} limit",
      spec_pct, MAX_SPECULATIVE),
