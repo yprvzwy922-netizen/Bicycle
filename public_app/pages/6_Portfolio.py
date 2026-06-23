@@ -321,23 +321,23 @@ acct_cash      = TOTAL_CAPITAL - stock_mv + short_liab
 reserved_cash  = book.loc[~book["_IS_STOCK"], "CASH AT RISK"].sum()
 available_cash = acct_cash - reserved_cash
 
-k1, k2, k3, k4, k5, k6, k7, k8 = st.columns(8)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric("TOTAL CAPITAL",     f"${TOTAL_CAPITAL:,.0f}",
           help="The base all risk caps are measured against. " + cap_note)
-k2.metric("OPEN POSITIONS",    len(book))
-k3.metric("TOTAL CASH (T-BILLS)", f"${acct_cash:,.0f}",
+k2.metric("TOTAL CASH (T-BILLS)", f"${acct_cash:,.0f}",
           help="Fund value − stock held + premium cash collected. The actual cash in the account.")
-k4.metric("CAPITAL DEPLOYED",  f"${total_deployed:,.0f}", f"{pct_deployed:.1%}",
-          help="Collateral securing open puts (cash-secured = strike×100; spreads = max loss; covered calls = $0).")
-k5.metric("AVAILABLE CASH",    f"${available_cash:,.0f}",
+k3.metric("CAPITAL DEPLOYED",  f"${total_deployed:,.0f}", f"{pct_deployed:.1%}",
+          help="Collateral securing open puts = the max capital at risk (cash-secured = strike×100; "
+               "spreads = max loss; covered calls = $0). Same figure as total max loss.")
+k4.metric("AVAILABLE CASH",    f"${available_cash:,.0f}",
           help="Dry powder free to deploy into new cash-secured puts (total cash − collateral reserved).")
-k6.metric("PREMIUM RECEIVED",  f"${total_premium:,.0f}",
+k5.metric("PREMIUM RECEIVED",  f"${total_premium:,.0f}",
           help="Σ premium × 100 × contracts on open short options (credit collected up front)")
-k7.metric("TOTAL MAX LOSS",    f"${total_max_loss:,.0f}")
-k8.metric("UNREAL PNL (MID)",  f"${total_unreal:,.0f}",
+k6.metric("UNREAL PNL (MID)",  f"${total_unreal:,.0f}",
           help="(Premium received − current mid) × 100 × contracts")
 
-st.caption(f"CAPITAL BASE — {cap_note}  |  NET $ DELTA: ${total_ddelta:,.0f} (in the delta tables below)")
+st.caption(f"CAPITAL BASE — {cap_note}  |  OPEN POSITIONS: {len(book)}  |  NET $ DELTA: ${total_ddelta:,.0f} "
+           f"(both detailed below)")
 
 st.markdown("---")
 
