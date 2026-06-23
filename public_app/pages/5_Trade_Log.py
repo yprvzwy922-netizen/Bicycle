@@ -136,6 +136,15 @@ nt_signal  = pc1b.selectbox("ALPHA TREND SIGNAL (DAILY)", [
 ], key="nt_signal")
 nt_notes   = pc2.text_input("NOTES", key="nt_notes")
 
+# ── Accountability: who recommended this trade + was it a consensus call ───────
+ac1, ac2, ac3 = st.columns([2, 1.5, 6])
+_members = db.load_investors()
+_rec_opts = (_members if _members else []) + ["Consensus", "Other"]
+nt_rec = ac1.selectbox("RECOMMENDED BY", _rec_opts, key="nt_rec",
+                       help="Who in the fund put this trade forward (accountability).")
+nt_consensus = ac2.checkbox("CONSENSUS TRADE", key="nt_consensus",
+                            help="Everyone in the fund agreed on this one.")
+
 # Auto-calculations
 nt_dte = None if is_stock else max((nt_expiry - datetime.date.today()).days, 0)
 
@@ -214,6 +223,8 @@ if st.button("ADD TRADE", type="primary", use_container_width=False):
             "CLOSE PRICE":      None,
             "REALIZED PNL":     None,
             "SIGNAL":           nt_signal,
+            "RECOMMENDED BY":   nt_rec,
+            "CONSENSUS":        bool(nt_consensus),
             "NOTES":            nt_notes,
         }
         db.save_trades_df(pd.concat([trades, pd.DataFrame([new_row])], ignore_index=True))
@@ -489,6 +500,34 @@ if not trades.empty:
         st.dataframe(
             by_strat.style.format({"TOTAL PNL":"${:,.2f}","AVG PNL":"${:,.2f}"}),
             use_container_width=True, hide_index=True)
+
+    # ── Accountability — who recommended what, and how it did ──────────────────
+    if "RECOMMENDED BY" in trades.columns and trades["RECOMMENDED BY"].notna().any():
+        st.markdown("### ACCOUNTABILITY — TRADES BY RECOMMENDER")
+        acc = trades.copy()
+        acc["RECOMMENDED BY"] = acc["RECOMMENDED BY"].fillna("—")
+        acc["REALIZED PNL"]   = pd.to_numeric(acc["REALIZED PNL"], errors="coerce")
+        acc["CONSENSUS"]      = acc["CONSENSUS"].fillna(False).astype(bool)
+        tally = acc.groupby("RECOMMENDED BY").agg(
+            TRADES=("ID", "count"),
+            OPEN=("STATUS", lambda s: (s == "OPEN").sum()),
+            CLOSED=("STATUS", lambda s: (s != "OPEN").sum()),
+            CONSENSUS=("CONSENSUS", "sum"),
+            REALIZED_PNL=("REALIZED PNL", "sum"),
+        ).reset_index()
+        ck1, ck2, ck3 = st.columns(3)
+        ck1.metric("TOTAL TRADES LOGGED", int(tally["TRADES"].sum()))
+        ck2.metric("CONSENSUS TRADES", int(acc["CONSENSUS"].sum()))
+        ck3.metric("SOLO TRADES", int((~acc["CONSENSUS"]).sum()))
+        def _cpnl(v):
+            try: return "color:#00e676" if float(v) > 0 else "color:#ff4444" if float(v) < 0 else ""
+            except: return ""
+        st.dataframe(
+            tally.style.map(_cpnl, subset=["REALIZED_PNL"])
+                 .format({"REALIZED_PNL": "${:,.2f}"}),
+            use_container_width=True, hide_index=True)
+        st.caption("Accountability: tracks who put each trade forward and how their calls performed. "
+                   "CONSENSUS = everyone agreed.")
 
     # ── Income chart — realized premium vs the plan ───────────────────────────
     if not closed.empty and closed["DATE CLOSED"].notna().any():

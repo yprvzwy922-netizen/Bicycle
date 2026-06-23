@@ -323,6 +323,36 @@ st.caption(f"CAPITAL BASE — {cap_note}")
 st.caption("CAPITAL DEPLOYED: cash-secured puts use strike×100; spreads use their max loss (defined risk); "
            "covered calls count $0 (stock-secured, not cash) so they don't inflate deployment.")
 
+# ── Cash & dry powder ─────────────────────────────────────────────────────────
+# Account is all cash (mostly T-bills); some is reserved to secure open puts.
+#   Total cash = fund value − stock you hold + the premium cash you've collected
+#               (= NAV + cost-to-close open shorts − long-stock market value)
+#   Reserved   = collateral on open short puts (Capital Deployed, excl. stock)
+#   Available  = dry powder for new puts
+stock_mv = 0.0
+short_liab = 0.0
+for _, r in book.iterrows():
+    if r["_IS_STOCK"]:
+        s = r["SPOT"]
+        if s is not None and not (isinstance(s, float) and np.isnan(s)):
+            stock_mv += s * r["CONTRACTS"]
+    elif r["_IS_SHORT"]:
+        cm = r["CURRENT MID"]
+        if cm is not None and not (isinstance(cm, float) and np.isnan(cm)):
+            short_liab += cm * 100 * r["CONTRACTS"]
+total_cash    = TOTAL_CAPITAL - stock_mv + short_liab
+reserved_cash = book.loc[~book["_IS_STOCK"], "CASH AT RISK"].sum()
+available_cash = total_cash - reserved_cash
+
+st.markdown("### CASH & DRY POWDER")
+cc1, cc2, cc3 = st.columns(3)
+cc1.metric("TOTAL CASH (≈ T-BILLS)", f"${total_cash:,.0f}",
+           help="Fund value − stock held + premium cash collected. The actual cash in the account.")
+cc2.metric("RESERVED (SECURING PUTS)", f"${reserved_cash:,.0f}",
+           help="Collateral tied up by open short puts (= capital deployed, excluding stock).")
+cc3.metric("AVAILABLE CASH", f"${available_cash:,.0f}",
+           help="Dry powder free to deploy into new cash-secured puts.")
+
 st.markdown("---")
 
 # ── Position table ────────────────────────────────────────────────────────────

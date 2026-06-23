@@ -17,7 +17,8 @@ TRADE_COLUMNS = [
     "ID","DATE OPENED","TICKER","STRATEGY",
     "SHORT STRIKE","LONG STRIKE","EXPIRY","DTE OPEN",
     "CONTRACTS","PREMIUM / CREDIT","CASH SECURED","MAX LOSS",
-    "STATUS","DATE CLOSED","CLOSE PRICE","REALIZED PNL","SIGNAL","NOTES"
+    "STATUS","DATE CLOSED","CLOSE PRICE","REALIZED PNL","SIGNAL",
+    "RECOMMENDED BY","CONSENSUS","NOTES"
 ]
 
 _COL2DB = {
@@ -26,7 +27,8 @@ _COL2DB = {
     "DTE OPEN":"dte_open", "CONTRACTS":"contracts", "PREMIUM / CREDIT":"premium",
     "CASH SECURED":"cash_secured", "MAX LOSS":"max_loss", "STATUS":"status",
     "DATE CLOSED":"date_closed", "CLOSE PRICE":"close_price",
-    "REALIZED PNL":"realized_pnl", "SIGNAL":"signal", "NOTES":"notes",
+    "REALIZED PNL":"realized_pnl", "SIGNAL":"signal",
+    "RECOMMENDED BY":"recommended_by", "CONSENSUS":"consensus", "NOTES":"notes",
 }
 _DB2COL = {v: k for k, v in _COL2DB.items()}
 
