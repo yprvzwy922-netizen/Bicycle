@@ -298,8 +298,6 @@ else:
 # ── Portfolio KPIs (single row, cash included) ────────────────────────────────
 total_deployed = book["CASH AT RISK"].sum()
 total_max_loss = book["MAX LOSS"].sum()
-pct_deployed   = total_deployed / TOTAL_CAPITAL if TOTAL_CAPITAL else 0
-cash_buffer    = 1 - pct_deployed
 total_ddelta   = pd.to_numeric(book["$ DELTA"], errors="coerce").sum()   # used by risk checks
 short_opt      = book[(~book["_IS_STOCK"]) & (book["_IS_SHORT"])]
 total_premium  = (pd.to_numeric(short_opt["PREM RECEIVED"], errors="coerce") *
@@ -320,6 +318,12 @@ for _, r in book.iterrows():
 acct_cash      = TOTAL_CAPITAL - stock_mv + short_liab
 reserved_cash  = book.loc[~book["_IS_STOCK"], "CASH AT RISK"].sum()
 available_cash = acct_cash - reserved_cash
+
+# % deployed is measured against CASH (puts are cash-secured), NOT NAV — NAV
+# understates the base by the open short-put liability, which would falsely
+# show >100% even when you hold more than enough cash to secure every put.
+pct_deployed   = reserved_cash / acct_cash if acct_cash else 0
+cash_buffer    = 1 - pct_deployed
 
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric("TOTAL CAPITAL",     f"${TOTAL_CAPITAL:,.0f}",
