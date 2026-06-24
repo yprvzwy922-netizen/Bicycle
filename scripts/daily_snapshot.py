@@ -100,16 +100,35 @@ cash_sec = sum(float(t["cash_secured"] or 0) for t in open_t)
 unreal = 0.0
 for t in open_t:
     try:
-        strike, expiry = float(t["short_strike"] or 0), t.get("expiry")
+        strat = str(t["strategy"])
         prem, ctrs = float(t["premium"] or 0), int(t["contracts"] or 0)
+        tkr = t["ticker"]
+        # Long Stock: mark vs entry price, per share
+        if strat == "Long Stock":
+            h = yf.Ticker(tkr).history(period="2d")
+            if not h.empty and prem > 0:
+                unreal += (float(h["Close"].iloc[-1]) - prem) * ctrs
+            continue
+        strike, expiry = float(t["short_strike"] or 0), t.get("expiry")
         if not strike or not expiry:
             continue
-        opt_type = "put" if "Put" in str(t["strategy"]) else "call"
-        raw = yf.Ticker(t["ticker"]).option_chain(expiry)
+        opt_type = "put" if "Put" in strat else "call"
+        raw = yf.Ticker(tkr).option_chain(expiry)
         chain = raw.puts if opt_type == "put" else raw.calls
-        row = chain.iloc[(chain["strike"] - strike).abs().idxmin()]
-        mid = float((row["bid"] + row["ask"]) / 2)
-        is_short = str(t["strategy"]) not in ("Long Put (Hedge)", "Long Call")
+        if chain is None or chain.empty:
+            continue
+        chain = chain.copy()
+        chain["dist"] = (chain["strike"] - strike).abs()
+        row = chain.loc[chain["dist"].idxmin()]
+        # Don't snap to a strike we don't actually hold, and don't mark a
+        # contract with no quotes — either would corrupt NAV. Leave it flat.
+        if float(row["dist"]) > max(0.015 * strike, 0.50):
+            continue
+        bid, ask = float(row["bid"]), float(row["ask"])
+        if (bid <= 0 and ask <= 0) or (np.isnan(bid) and np.isnan(ask)):
+            continue
+        mid = (bid + ask) / 2
+        is_short = strat not in ("Long Put (Hedge)", "Long Call")
         unreal += ((prem - mid) if is_short else (mid - prem)) * 100 * ctrs
     except Exception as e:
         print(f"  mark {t.get('ticker')}: {e}")
