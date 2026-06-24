@@ -537,12 +537,23 @@ def fetch_option_live(tkr: str, strike: float, expiry: str, option_type: str = "
     try:
         raw = yf.Ticker(tkr).option_chain(expiry)
         chain = raw.puts if option_type == "put" else raw.calls
+        if chain is None or chain.empty:
+            return float("nan"), float("nan")
         chain = chain.copy()
         chain["dist"] = (chain["strike"] - strike).abs()
         row = chain.loc[chain["dist"].idxmin()]
-        mid = float((row["bid"] + row["ask"]) / 2)
+        # The exact strike we hold must actually be listed — don't snap to a far
+        # strike (e.g. SPCX has no 150 put, lowest is 162.5). A bogus mark would
+        # corrupt unrealized P&L and NAV. Reject if nearest strike is too far.
+        tol = max(0.015 * strike, 0.50)
+        if float(row["dist"]) > tol:
+            return float("nan"), float("nan")
+        bid, ask = float(row["bid"]), float(row["ask"])
+        if (bid <= 0 and ask <= 0) or (np.isnan(bid) and np.isnan(ask)):
+            return float("nan"), float("nan")     # no quotes -> can't mark
+        mid = (bid + ask) / 2
         iv  = float(row["impliedVolatility"])
-        return mid, iv
+        return float(mid), iv
     except Exception:
         return float("nan"), float("nan")
 
