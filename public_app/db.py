@@ -246,7 +246,7 @@ def add_contribution(investor, date, amount, units_issued, nav_per_unit):
     st.session_state["contributions"] = pd.concat(
         [cur, pd.DataFrame([rec])], ignore_index=True)
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def load_fund_snapshots() -> pd.DataFrame:
     try:
         rows = _rest("GET", "fund_snapshots",

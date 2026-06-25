@@ -25,9 +25,14 @@ if not st.session_state.get("authenticated"):
     if st.button("HOME"): st.switch_page("app.py")
     st.stop()
 
-c_nav1, _ = st.columns([1, 9])
+c_nav1, c_nav2, _ = st.columns([1, 2, 7])
 with c_nav1:
     if st.button("HOME"): st.switch_page("app.py")
+with c_nav2:
+    if st.button("↻ REFRESH DATA", help="Pull the latest snapshots from Supabase (after a manual run)"):
+        db.load_fund_snapshots.clear()
+        db.load_portfolio_snapshots.clear()
+        st.rerun()
 
 st.title("FUND & NAV")
 st.caption("UNITIZED MULTI-INVESTOR FUND | EACH CONTRIBUTION BUYS UNITS AT THE NAV/UNIT OF ITS DATE")
