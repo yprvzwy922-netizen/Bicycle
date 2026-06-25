@@ -36,25 +36,20 @@ def rest(method, table, params=None, json=None, prefer=None):
     return r.json() if r.text else None
 
 def last_trading_day():
-    """Most recent COMPLETED US trading session, dated correctly no matter when
-    GitHub actually runs the job. Primary method derives it from real market
-    data (SPY's last daily bar) — that handles weekends AND holidays for free.
-    Calendar fallback (weekends only) if the data fetch fails."""
+    """The trading day to stamp the snapshot with. Uses SPY's last daily bar,
+    which handles weekends AND holidays for free. On a trading day this is TODAY
+    (even intraday — we capture a current snapshot for today and overwrite it
+    later at close), so a run NEVER rewrites a completed past day. Only weekends/
+    holidays roll back to the prior session (SPY has no bar for those)."""
     now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
     try:
         h = yf.Ticker("SPY").history(period="7d")
         if not h.empty:
-            last = h.index[-1].date()
-            # If run intraday before close, today's forming bar isn't "complete"
-            if last == now_et.date() and now_et.time() < datetime.time(16, 0) and len(h) > 1:
-                last = h.index[-2].date()
-            return last
+            return h.index[-1].date()
     except Exception:
         pass
     d = now_et.date()
-    if now_et.weekday() < 5 and now_et.time() < datetime.time(16, 0):
-        d -= datetime.timedelta(days=1)
-    while d.weekday() >= 5:
+    while d.weekday() >= 5:        # weekend -> roll back to Friday
         d -= datetime.timedelta(days=1)
     return d
 
@@ -125,9 +120,13 @@ for t in open_t:
         if float(row["dist"]) > max(0.015 * strike, 0.50):
             continue
         bid, ask = float(row["bid"]), float(row["ask"])
-        if (bid <= 0 and ask <= 0) or (np.isnan(bid) and np.isnan(ask)):
+        last = float(row.get("lastPrice", float("nan")))
+        if bid > 0 and ask > 0:
+            mid = (bid + ask) / 2
+        elif not np.isnan(last) and last > 0:
+            mid = last
+        else:
             continue
-        mid = (bid + ask) / 2
         is_short = strat not in ("Long Put (Hedge)", "Long Call")
         unreal += ((prem - mid) if is_short else (mid - prem)) * 100 * ctrs
     except Exception as e:
