@@ -436,8 +436,7 @@ else:
         st.rerun()
 
     if cu2.button("DELETE TRADE", use_container_width=True):
-        remaining = trades[trades["ID"] != mod_id].reset_index(drop=True)
-        db.save_trades_df(remaining)
+        db.remove_trades([mod_id])          # targeted delete — won't touch other rows
         st.success(f"Trade #{mod_id} deleted.")
         st.rerun()
 
@@ -487,6 +486,12 @@ if not trades.empty:
             for i in edited.index[ids.isna()]:
                 edited.at[i, "ID"] = nxt
                 nxt += 1
+        # Rows the user removed in the editor -> delete ONLY those ids (targeted)
+        before = set(pd.to_numeric(trades["ID"], errors="coerce").dropna().astype(int))
+        after  = set(pd.to_numeric(edited["ID"], errors="coerce").dropna().astype(int))
+        removed = before - after
+        if removed:
+            db.remove_trades(list(removed))
         db.save_trades_df(edited)
         st.rerun()
 

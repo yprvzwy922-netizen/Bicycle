@@ -87,20 +87,24 @@ def load_trades() -> pd.DataFrame:
             df[c] = None
     return df[TRADE_COLUMNS]
 
-def replace_trades(df: pd.DataFrame):
-    """Upsert every row; delete DB rows whose id is no longer in df."""
+def upsert_trades(df: pd.DataFrame):
+    """Upsert the rows in df ONLY. Never deletes — so a concurrent user (or a
+    second device/tab) saving a different view can't wipe rows it didn't load.
+    Deletions go through delete_trades() with explicit ids."""
     recs = df.rename(columns=_COL2DB)[list(_COL2DB.values())].to_dict("records")
     recs = _clean(recs)
     recs = [r for r in recs if r.get("id") is not None]
     if recs:
         _rest("POST", "trades", json=recs,
               prefer="resolution=merge-duplicates,return=minimal")
-    keep = {int(r["id"]) for r in recs}
-    existing = _rest("GET", "trades", params={"select": "id"}) or []
-    stale = [str(int(r["id"])) for r in existing if int(r["id"]) not in keep]
-    if stale:
-        _rest("DELETE", "trades", params={"id": f"in.({','.join(stale)})"},
-              prefer="return=minimal")
+
+def delete_trades(ids):
+    """Delete specific trade ids (explicit, targeted — the only thing that deletes)."""
+    ids = [str(int(i)) for i in ids if i is not None]
+    if not ids:
+        return
+    _rest("DELETE", "trades", params={"id": f"in.({','.join(ids)})"},
+          prefer="return=minimal")
 
 def get_trades_df() -> pd.DataFrame:
     """DB-backed when configured (DB = source of truth), else session_state."""
@@ -116,15 +120,30 @@ def get_trades_df() -> pd.DataFrame:
     return st.session_state["trades"]
 
 def save_trades_df(df: pd.DataFrame) -> bool:
-    """Returns True if persisted (DB write ok, or session-only mode)."""
+    """Persist via UPSERT-ONLY (safe for concurrent users). Returns True on success.
+    To remove trades, call delete_trades() — saving never deletes."""
     st.session_state["trades"] = df
     if configured():
         try:
-            replace_trades(df)
+            upsert_trades(df)
             return True
         except Exception as e:
             st.error(f"DB write failed — change kept in session only. ({e})")
             return False
+    return True
+
+def remove_trades(ids) -> bool:
+    """Delete trades from the DB and session. Use for the Delete button / editor."""
+    if configured():
+        try:
+            delete_trades(ids)
+        except Exception as e:
+            st.error(f"DB delete failed. ({e})")
+            return False
+    if "trades" in st.session_state and not st.session_state["trades"].empty:
+        idset = {int(i) for i in ids}
+        df = st.session_state["trades"]
+        st.session_state["trades"] = df[~pd.to_numeric(df["ID"], errors="coerce").isin(idset)]
     return True
 
 # ── Watchlist ─────────────────────────────────────────────────────────────────
