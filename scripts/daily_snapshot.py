@@ -54,7 +54,25 @@ def last_trading_day():
     return d
 
 TODAY = last_trading_day().isoformat()
-print(f"snapshot date (last trading day, ET): {TODAY}")
+TODAY_ET = datetime.datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+# A snapshot dated before the actual current ET date is a COMPLETED past
+# session — never overwrite it. Only the live (current) day may be rewritten
+# (intraday -> close). This keeps stored history immutable.
+IS_PAST_DAY = TODAY < TODAY_ET
+print(f"snapshot date: {TODAY}  (today ET: {TODAY_ET}, past-day lock: {IS_PAST_DAY})")
+
+def already_stored(table):
+    try:
+        rows = rest("GET", table, params={"select": "snap_date", "snap_date": f"eq.{TODAY}"})
+        return bool(rows)
+    except Exception:
+        return False
+
+def should_skip(table):
+    if IS_PAST_DAY and already_stored(table):
+        print(f"{table} {TODAY} already stored (completed day) — NOT overwriting")
+        return True
+    return False
 
 # ── Per-ticker snapshots ──────────────────────────────────────────────────────
 wl = rest("GET", "watchlist", params={"select": "ticker"}) or []
@@ -128,33 +146,34 @@ for t in open_t:
     except Exception as e:
         print(f"  mark {t.get('ticker')}: {e}")
 
-rest("POST", "portfolio_snapshots", json=[{
-    "snap_date": TODAY,
-    "open_positions": len(open_t),
-    "total_credits": round(credits, 2),
-    "unreal_pnl": round(unreal, 2),
-    "realized_pnl": round(realized, 2),
-    "cash_secured": round(cash_sec, 2),
-}], prefer="resolution=merge-duplicates,return=minimal")
-
-print(f"portfolio snapshot {TODAY}: open={len(open_t)} unreal=${unreal:,.0f} realized=${realized:,.0f}")
+if not should_skip("portfolio_snapshots"):
+    rest("POST", "portfolio_snapshots", json=[{
+        "snap_date": TODAY,
+        "open_positions": len(open_t),
+        "total_credits": round(credits, 2),
+        "unreal_pnl": round(unreal, 2),
+        "realized_pnl": round(realized, 2),
+        "cash_secured": round(cash_sec, 2),
+    }], prefer="resolution=merge-duplicates,return=minimal")
+    print(f"portfolio snapshot {TODAY}: open={len(open_t)} unreal=${unreal:,.0f} realized=${realized:,.0f}")
 
 # ── Fund NAV snapshot (unitized) ──────────────────────────────────────────────
-try:
-    contribs = rest("GET", "contributions", params={"select": "*"}) or []
-    contributed = sum(float(c["amount"] or 0) for c in contribs)
-    units       = sum(float(c["units_issued"] or 0) for c in contribs)
-    nav         = contributed + realized + unreal
-    nav_per_unit = (nav / units) if units > 0 else 100.0
-    rest("POST", "fund_snapshots", json=[{
-        "snap_date": TODAY,
-        "nav": round(nav, 2),
-        "units": round(units, 4),
-        "nav_per_unit": round(nav_per_unit, 4),
-        "contributed": round(contributed, 2),
-        "realized_pnl": round(realized, 2),
-        "unreal_pnl": round(unreal, 2),
-    }], prefer="resolution=merge-duplicates,return=minimal")
-    print(f"fund snapshot {TODAY}: NAV=${nav:,.0f} units={units:,.2f} nav/unit=${nav_per_unit:,.2f}")
-except Exception as e:
-    print(f"fund snapshot skipped: {e}")
+if not should_skip("fund_snapshots"):
+    try:
+        contribs = rest("GET", "contributions", params={"select": "*"}) or []
+        contributed = sum(float(c["amount"] or 0) for c in contribs)
+        units       = sum(float(c["units_issued"] or 0) for c in contribs)
+        nav         = contributed + realized + unreal
+        nav_per_unit = (nav / units) if units > 0 else 100.0
+        rest("POST", "fund_snapshots", json=[{
+            "snap_date": TODAY,
+            "nav": round(nav, 2),
+            "units": round(units, 4),
+            "nav_per_unit": round(nav_per_unit, 4),
+            "contributed": round(contributed, 2),
+            "realized_pnl": round(realized, 2),
+            "unreal_pnl": round(unreal, 2),
+        }], prefer="resolution=merge-duplicates,return=minimal")
+        print(f"fund snapshot {TODAY}: NAV=${nav:,.0f} units={units:,.2f} nav/unit=${nav_per_unit:,.2f}")
+    except Exception as e:
+        print(f"fund snapshot skipped: {e}")
