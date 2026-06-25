@@ -238,6 +238,15 @@ for _, t in open_trades.iterrows():
             short_strike * 100 * ctrs if short_strike > 0 else 0)
         max_loss = stored_loss if stored_loss is not None else cash_sec
 
+    # Breakeven price: short put = strike − premium; call = strike + premium;
+    # stock = entry price. The price at which the position turns from profit to loss.
+    if is_stock:
+        breakeven = prem if prem > 0 else None
+    elif short_strike > 0:
+        breakeven = (short_strike - prem) if is_put else (short_strike + prem)
+    else:
+        breakeven = None
+
     wl_info = wl_map.get(tkr, {})
     rows.append({
         "ID":            t["ID"],
@@ -247,6 +256,7 @@ for _, t in open_trades.iterrows():
         "BUCKET":        wl_info.get("bucket", "Unknown"),
         "SPOT":          round(spot, 2)          if not np.isnan(spot)        else None,
         "SHORT STRIKE":  short_strike            if short_strike > 0          else None,
+        "BREAKEVEN":     round(breakeven, 2)     if breakeven is not None      else None,
         "EXPIRY":        t["EXPIRY"],
         "TENOR":         tenor,
         "DTE LEFT":      dte_rem,
@@ -382,6 +392,7 @@ def color_action(v):
 fmt = {
     "SPOT":          "${:.2f}",
     "SHORT STRIKE":  "${:.2f}",
+    "BREAKEVEN":     "${:.2f}",
     "PREM RECEIVED": "${:.2f}",
     "CURRENT MID":   "${:.2f}",
     "TOTAL $ PREM RECEIVED": "${:,.0f}",
