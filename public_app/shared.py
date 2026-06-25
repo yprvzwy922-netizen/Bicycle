@@ -549,14 +549,12 @@ def fetch_option_live(tkr: str, strike: float, expiry: str, option_type: str = "
         if float(row["dist"]) > tol:
             return float("nan"), float("nan")
         bid, ask = float(row["bid"]), float(row["ask"])
-        last = float(row.get("lastPrice", float("nan")))
-        if bid > 0 and ask > 0:
-            mid = (bid + ask) / 2                  # live two-sided market
-        elif not np.isnan(last) and last > 0:
-            mid = last                             # illiquid: fall back to last trade
-        else:
-            return float("nan"), float("nan")      # genuinely no data
-        iv = float(row["impliedVolatility"])
+        if not (bid > 0 and ask > 0):
+            # No reliable two-sided quote -> don't guess with a stale last price.
+            # Leave the position FLAT (marked at entry) so NAV stays stable.
+            return float("nan"), float("nan")
+        mid = (bid + ask) / 2
+        iv  = float(row["impliedVolatility"])
         return float(mid), iv
     except Exception:
         return float("nan"), float("nan")

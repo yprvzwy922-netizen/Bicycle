@@ -120,13 +120,9 @@ for t in open_t:
         if float(row["dist"]) > max(0.015 * strike, 0.50):
             continue
         bid, ask = float(row["bid"]), float(row["ask"])
-        last = float(row.get("lastPrice", float("nan")))
-        if bid > 0 and ask > 0:
-            mid = (bid + ask) / 2
-        elif not np.isnan(last) and last > 0:
-            mid = last
-        else:
-            continue
+        if not (bid > 0 and ask > 0):
+            continue                               # no reliable quote -> leave flat
+        mid = (bid + ask) / 2
         is_short = strat not in ("Long Put (Hedge)", "Long Call")
         unreal += ((prem - mid) if is_short else (mid - prem)) * 100 * ctrs
     except Exception as e:
