@@ -98,6 +98,17 @@ DEFAULT_WATCHLIST = [
     {"ticker": "PLTR",  "company": "Palantir",                "sector": "Technology",           "bucket": "Growth",      "conviction": 3, "delta_band": "Wheel"},
     {"ticker": "DELL",  "company": "Dell Technologies",       "sector": "Data Centers & AI",    "bucket": "Growth",      "conviction": 3, "delta_band": "Wheel"},
     {"ticker": "SMCI",  "company": "Super Micro Computer",    "sector": "Data Centers & AI",    "bucket": "Growth",      "conviction": 2, "delta_band": "Income"},
+    # ── Added 2026-06-25: premium machines + diversifiers (lower AI correlation) ─
+    {"ticker": "TSLA",  "company": "Tesla",                   "sector": "Consumer",             "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "CRWD",  "company": "CrowdStrike",             "sector": "Technology",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "APP",   "company": "AppLovin",                "sector": "Technology",           "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "COIN",  "company": "Coinbase",                "sector": "Crypto & Digital",     "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "MA",    "company": "Mastercard",             "sector": "Financials",           "bucket": "Core",        "conviction": 4, "delta_band": "Income"},
+    {"ticker": "JPM",   "company": "JPMorgan Chase",          "sector": "Financials",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "CAT",   "company": "Caterpillar",             "sector": "Industrials",          "bucket": "Core",        "conviction": 3, "delta_band": "Wheel"},
+    {"ticker": "UNH",   "company": "UnitedHealth",            "sector": "Healthcare",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "HOOD",  "company": "Robinhood",               "sector": "Financials",           "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "SOFI",  "company": "SoFi Technologies",       "sector": "Financials",           "bucket": "Growth",      "conviction": 2, "delta_band": "Income"},
 ]
 
 SECTORS = sorted(set(w["sector"] for w in DEFAULT_WATCHLIST))
