@@ -26,7 +26,7 @@ DEFAULT_WATCHLIST = [
     {"ticker": "GEV",   "company": "GE Vernova",              "sector": "Energy & Power",       "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
     {"ticker": "NVDA",  "company": "NVIDIA",                  "sector": "Semiconductors",       "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
     {"ticker": "MU",    "company": "Micron",                  "sector": "Semiconductors",       "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
-    {"ticker": "AMD",   "company": "Advanced Micro Devices",  "sector": "Semiconductors",       "bucket": "Growth",      "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "AMD",   "company": "Advanced Micro Devices",  "sector": "Semiconductors",       "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
     {"ticker": "GOOG",  "company": "Alphabet",                "sector": "Technology",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
     {"ticker": "BB",    "company": "BlackBerry",              "sector": "Technology",           "bucket": "Growth",      "conviction": 4, "delta_band": "Wheel"},
     {"ticker": "UBER",  "company": "Uber Technologies",       "sector": "Technology",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
@@ -84,6 +84,20 @@ DEFAULT_WATCHLIST = [
     {"ticker": "IBIT",  "company": "iShares Bitcoin Trust",   "sector": "Crypto & Digital",     "bucket": "Speculative", "conviction": 3, "delta_band": "Income"},
     {"ticker": "ETHA",  "company": "iShares Ethereum Trust",  "sector": "Crypto & Digital",     "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
     {"ticker": "GLXY",  "company": "Galaxy Digital",          "sector": "Crypto & Digital",     "bucket": "Speculative", "conviction": 2, "delta_band": "Income"},
+    # ── Added 2026-06-25: CORE anchors to broaden tradable setups (on-theme,
+    #    mega-cap, deep options) — addresses being under the Core target ──────────
+    {"ticker": "MSFT",  "company": "Microsoft",               "sector": "Technology",           "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
+    {"ticker": "META",  "company": "Meta Platforms",          "sector": "Technology",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "AMZN",  "company": "Amazon",                  "sector": "Technology",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "TSM",   "company": "Taiwan Semiconductor",    "sector": "Semiconductors",       "bucket": "Core",        "conviction": 5, "delta_band": "Wheel"},
+    {"ticker": "ANET",  "company": "Arista Networks",         "sector": "Data Centers & AI",    "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "ORCL",  "company": "Oracle",                  "sector": "Data Centers & AI",    "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "ETN",   "company": "Eaton",                   "sector": "Energy & Power",       "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    {"ticker": "ABBV",  "company": "AbbVie",                  "sector": "Healthcare",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
+    # ── Growth complements: liquid, on-theme, frequent setups ──────────────────
+    {"ticker": "PLTR",  "company": "Palantir",                "sector": "Technology",           "bucket": "Growth",      "conviction": 3, "delta_band": "Wheel"},
+    {"ticker": "DELL",  "company": "Dell Technologies",       "sector": "Data Centers & AI",    "bucket": "Growth",      "conviction": 3, "delta_band": "Wheel"},
+    {"ticker": "SMCI",  "company": "Super Micro Computer",    "sector": "Data Centers & AI",    "bucket": "Growth",      "conviction": 2, "delta_band": "Income"},
 ]
 
 SECTORS = sorted(set(w["sector"] for w in DEFAULT_WATCHLIST))
