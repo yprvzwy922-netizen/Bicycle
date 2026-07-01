@@ -162,34 +162,40 @@ if db.configured():
         # ACTUAL dates (from the contributions table), not derived from the snapshot
         # diff — so they land on the right day and don't overlap the value line.
         fig = go.Figure()
-        # Contributions as bars SIZED TO THEIR $ AMOUNT (261k towers over 50k),
-        # on their real dates.
+        # Contributions as bars on a SEPARATE right-hand scale, so a $50k bar is
+        # readable next to a $260k NAV line (dual axis).
+        contrib_max = 0.0
         if not contribs.empty and "date" in contribs.columns:
             cby = (contribs.assign(amount=pd.to_numeric(contribs["amount"], errors="coerce"))
                    .groupby("date")["amount"].sum().sort_index())
             dates = [pd.Timestamp(d) for d in cby.index]
             span = (max(dates) - min(dates)).days if len(dates) > 1 else 6
-            # Narrow bars so contributions on adjacent days stay visually SEPARATE
-            bar_w = max(0.35, span * 0.012) * 86400000.0   # width in ms, scales with range
-            fig.add_bar(x=dates, y=list(cby.values), name="CONTRIBUTIONS",
-                        marker_color="rgba(255,153,0,0.45)", width=bar_w,
+            bar_w = max(0.35, span * 0.012) * 86400000.0   # narrow -> adjacent days stay separate
+            contrib_max = float(cby.max()) if cby.notna().any() else 0.0
+            fig.add_bar(x=dates, y=list(cby.values), name="CONTRIBUTIONS", yaxis="y2",
+                        marker_color="rgba(255,153,0,0.55)", width=bar_w,
                         text=[f"+${v:,.0f}" for v in cby.values], textposition="outside",
                         textfont=dict(color="#ff9900", size=10),
                         hovertemplate="Contribution %{x|%b %d}: $%{y:,.0f}<extra></extra>")
-        # Fund value (NAV) line on top
+        # Fund value (NAV) line on the primary (left) scale
         fig.add_scatter(x=[pd.Timestamp(d) for d in fs["snap_date"]], y=fs["nav"],
                         name="FUND VALUE", mode="lines+markers",
                         line=dict(color="#00c8ff", width=2))
         fig.update_layout(
             paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
             font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
-            legend=dict(orientation="h", y=1.12), barmode="overlay",
-            margin=dict(l=40, r=20, t=40, b=40), height=380,
+            legend=dict(orientation="h", y=1.14), barmode="overlay",
+            margin=dict(l=40, r=55, t=40, b=40), height=380,
             xaxis=dict(gridcolor="#1e1e1e", type="date", tickformat="%b %d"),
-            yaxis=dict(gridcolor="#1e1e1e", tickprefix="$"))
+            yaxis=dict(gridcolor="#1e1e1e", tickprefix="$", title="NAV",
+                       titlefont=dict(color="#00c8ff"), tickfont=dict(color="#00c8ff")),
+            yaxis2=dict(overlaying="y", side="right", showgrid=False, tickprefix="$",
+                        title="CONTRIB", titlefont=dict(color="#ff9900"),
+                        tickfont=dict(color="#ff9900"),
+                        range=[0, contrib_max * 1.6] if contrib_max > 0 else None))
         st.plotly_chart(fig, use_container_width=True)
-        st.caption("Blue line = total fund value (NAV). Orange bars = cash contributions, "
-                   "SIZED to the amount, on the day made. Performance is the NAV/unit chart below.")
+        st.caption("Blue line = total fund value (NAV, left axis). Orange bars = cash contributions "
+                   "(right axis, own scale so they're readable). Performance is the NAV/unit chart below.")
 
         st.markdown("### NAV PER UNIT — HISTORY")
         st.caption("Per-unit value is unaffected by infusions (that's the point of unit accounting) "
