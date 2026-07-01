@@ -187,10 +187,11 @@ if db.configured():
             legend=dict(orientation="h", y=1.14), barmode="overlay",
             margin=dict(l=40, r=55, t=40, b=40), height=380,
             xaxis=dict(gridcolor="#1e1e1e", type="date", tickformat="%b %d"),
-            yaxis=dict(gridcolor="#1e1e1e", tickprefix="$", title="NAV",
-                       titlefont=dict(color="#00c8ff"), tickfont=dict(color="#00c8ff")),
+            yaxis=dict(gridcolor="#1e1e1e", tickprefix="$",
+                       title=dict(text="NAV", font=dict(color="#00c8ff")),
+                       tickfont=dict(color="#00c8ff")),
             yaxis2=dict(overlaying="y", side="right", showgrid=False, tickprefix="$",
-                        title="CONTRIB", titlefont=dict(color="#ff9900"),
+                        title=dict(text="CONTRIB", font=dict(color="#ff9900")),
                         tickfont=dict(color="#ff9900"),
                         range=[0, contrib_max * 1.6] if contrib_max > 0 else None))
         st.plotly_chart(fig, use_container_width=True)
