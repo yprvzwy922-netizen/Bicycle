@@ -169,7 +169,8 @@ if db.configured():
                    .groupby("date")["amount"].sum().sort_index())
             dates = [pd.Timestamp(d) for d in cby.index]
             span = (max(dates) - min(dates)).days if len(dates) > 1 else 6
-            bar_w = max(1.0, span * 0.04) * 86400000.0     # width in ms, scales with range
+            # Narrow bars so contributions on adjacent days stay visually SEPARATE
+            bar_w = max(0.35, span * 0.012) * 86400000.0   # width in ms, scales with range
             fig.add_bar(x=dates, y=list(cby.values), name="CONTRIBUTIONS",
                         marker_color="rgba(255,153,0,0.45)", width=bar_w,
                         text=[f"+${v:,.0f}" for v in cby.values], textposition="outside",
