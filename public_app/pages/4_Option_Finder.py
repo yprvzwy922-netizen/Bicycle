@@ -407,7 +407,8 @@ if st.session_state.get("at_last_strike") != sel_strike:
     st.session_state["at_last_strike"] = sel_strike
 
 at1, at2, at3, at4, at5 = st.columns([1.2, 1.2, 1.4, 1.2, 2])
-at_action = at1.selectbox("ACTION", ["sell", "buy"], key="at_action")
+at_action = at1.selectbox("ACTION", ["sell to open", "buy to close", "buy to open", "sell to close"],
+                          key="at_action")
 at_cts    = at2.number_input("CONTRACTS", min_value=1, step=1, key="at_cts",
                              help="Defaults to the $25k-tranche size")
 at_price  = at3.number_input("PRICE (BID)", min_value=0.0, step=0.01, key="at_price",

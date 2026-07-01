@@ -45,7 +45,8 @@ edited = st.data_editor(
     use_container_width=True, hide_index=True, num_rows="fixed",
     disabled=["ticker", "expiry", "type", "strike", "LINE"],
     column_config={
-        "action":    st.column_config.SelectboxColumn("ACTION", options=["sell", "buy"]),
+        "action":    st.column_config.SelectboxColumn(
+            "ACTION", options=["sell to open", "buy to close", "buy to open", "sell to close"]),
         "price":     st.column_config.NumberColumn("PRICE", format="%.2f"),
         "contracts": st.column_config.NumberColumn("CTS", min_value=1, step=1),
         "LINE":      st.column_config.TextColumn("PREVIEW", width="large"),
@@ -72,7 +73,7 @@ account = mc1.text_input("ACCOUNT (optional)", key="ticket_account")
 # Totals
 total_contracts = sum(it["contracts"] for it in items)
 total_credit = sum(it["contracts"] * it["price"] * 100 for it in items
-                   if it["action"] == "sell")
+                   if str(it["action"]).startswith("sell"))
 k1, k2, k3 = st.columns(3)
 k1.metric("LINES", len(items))
 k2.metric("TOTAL CONTRACTS", total_contracts)
