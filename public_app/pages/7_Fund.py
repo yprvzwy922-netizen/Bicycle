@@ -152,48 +152,38 @@ if db.configured():
     fs = db.load_fund_snapshots()
     if not fs.empty and "snap_date" in fs.columns:
         fs = fs.sort_values("snap_date").reset_index(drop=True)
-        fs["nav"]         = pd.to_numeric(fs["nav"], errors="coerce")
-        fs["contributed"] = pd.to_numeric(fs["contributed"], errors="coerce").fillna(0)
-        fs["nav_per_unit"]= pd.to_numeric(fs["nav_per_unit"], errors="coerce")
-        # Daily cash infusion = change in cumulative contributions.
-        # First snapshot has no "previous day", so its infusion is 0 (the starting
-        # capital is not a same-day jump — that would spike the line up from $0).
-        fs["infusion"] = fs["contributed"].diff().fillna(0).clip(lower=0)
+        fs["nav"]          = pd.to_numeric(fs["nav"], errors="coerce")
+        fs["nav_per_unit"] = pd.to_numeric(fs["nav_per_unit"], errors="coerce")
 
         st.markdown("---")
         st.markdown("### FUND VALUE ($) — HISTORY")
 
-        # Build a NAV series where a cash infusion shows as a VERTICAL JUMP on its
-        # day (insert a pre-infusion point at nav - infusion), not a diagonal.
-        xs, ys = [], []
-        for _, r in fs.iterrows():
-            if r["infusion"] > 0:
-                xs.append(r["snap_date"]); ys.append(r["nav"] - r["infusion"])  # just before infusion
-            xs.append(r["snap_date"]); ys.append(r["nav"])                       # after infusion / EOD
-
+        # Single clean NAV line. Contributions are shown as vertical tags on their
+        # ACTUAL dates (from the contributions table), not derived from the snapshot
+        # diff — so they land on the right day and don't overlap the value line.
         fig = go.Figure()
-        # Cumulative contributions as a step line (the "money in" baseline)
-        fig.add_scatter(x=fs["snap_date"], y=fs["contributed"], name="CONTRIBUTED",
-                        mode="lines", line=dict(color="#ff9900", width=1, shape="hv"))
-        # Fund value, with infusion jumps (markers so a single day still shows)
-        fig.add_scatter(x=xs, y=ys, name="FUND VALUE", mode="lines+markers",
-                        line=dict(color="#00c8ff", width=2))
-        # Mark each infusion
-        inf = fs[fs["infusion"] > 0]
-        for _, r in inf.iterrows():
-            fig.add_annotation(x=r["snap_date"], y=r["nav"],
-                               text=f"+${r['infusion']:,.0f}", showarrow=True, arrowhead=2,
-                               font=dict(color="#ff9900", size=10), arrowcolor="#ff9900")
+        fig.add_scatter(x=fs["snap_date"], y=fs["nav"], name="FUND VALUE",
+                        mode="lines+markers", line=dict(color="#00c8ff", width=2),
+                        fill="tozeroy", fillcolor="rgba(0,200,255,0.05)")
+        if not contribs.empty and "date" in contribs.columns:
+            cby = (contribs.assign(amount=pd.to_numeric(contribs["amount"], errors="coerce"))
+                   .groupby("date")["amount"].sum())
+            for d, amt in cby.items():
+                if amt and amt > 0:
+                    x = pd.Timestamp(d)
+                    fig.add_vline(x=x, line_color="#ff9900", line_dash="dash", line_width=1)
+                    fig.add_annotation(x=x, y=1.0, yref="paper", yanchor="bottom",
+                                       text=f"+${amt:,.0f}", showarrow=False,
+                                       font=dict(color="#ff9900", size=10))
         fig.update_layout(
             paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
             font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
-            legend=dict(orientation="h", y=1.12),
-            margin=dict(l=40, r=20, t=30, b=40), height=360,
-            xaxis=dict(gridcolor="#1e1e1e", type="category"),
+            margin=dict(l=40, r=20, t=30, b=40), height=360, showlegend=False,
+            xaxis=dict(gridcolor="#1e1e1e", type="date", tickformat="%b %d"),
             yaxis=dict(gridcolor="#1e1e1e", tickprefix="$"))
         st.plotly_chart(fig, use_container_width=True)
-        st.caption("Cash infusions show as a vertical JUMP on their day (orange = money in). "
-                   "The gap between FUND VALUE and CONTRIBUTED is performance P&L.")
+        st.caption("Blue = total fund value (NAV). Orange dashed tag = cash added, on the day it was made. "
+                   "Pure performance (infusions removed) is the NAV/unit chart below.")
 
         st.markdown("### NAV PER UNIT — HISTORY")
         st.caption("Per-unit value is unaffected by infusions (that's the point of unit accounting) "
