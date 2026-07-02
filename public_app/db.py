@@ -88,16 +88,38 @@ def load_trades() -> pd.DataFrame:
             df[c] = None
     return df[TRADE_COLUMNS]
 
+# Columns the app can live without if the DB migration hasn't been run yet —
+# never let a missing optional column block trade entry.
+_OPTIONAL_DB_COLS = ["manual_mark", "recommended_by", "consensus", "signal"]
+
 def upsert_trades(df: pd.DataFrame):
     """Upsert the rows in df ONLY. Never deletes — so a concurrent user (or a
     second device/tab) saving a different view can't wipe rows it didn't load.
-    Deletions go through delete_trades() with explicit ids."""
-    recs = df.rename(columns=_COL2DB)[list(_COL2DB.values())].to_dict("records")
+    Deletions go through delete_trades() with explicit ids.
+    If the DB lacks an optional column (migration not run), retry without it."""
+    cols = [c for c in _COL2DB.values() if c in df.rename(columns=_COL2DB).columns]
+    recs = df.rename(columns=_COL2DB)[cols].to_dict("records")
     recs = _clean(recs)
     recs = [r for r in recs if r.get("id") is not None]
-    if recs:
-        _rest("POST", "trades", json=recs,
-              prefer="resolution=merge-duplicates,return=minimal")
+    if not recs:
+        return
+    dropped = []
+    while True:
+        try:
+            _rest("POST", "trades", json=recs,
+                  prefer="resolution=merge-duplicates,return=minimal")
+            if dropped:
+                st.warning(f"Saved, but the DB is missing column(s): {', '.join(dropped)} — "
+                           f"those fields weren't stored. Run the ALTER in supabase_schema.sql.")
+            return
+        except RuntimeError as e:
+            msg = str(e)
+            victim = next((c for c in _OPTIONAL_DB_COLS
+                           if c in msg and c not in dropped), None)
+            if victim is None:
+                raise                      # a real error — surface it
+            dropped.append(victim)
+            recs = [{k: v for k, v in r.items() if k != victim} for r in recs]
 
 def delete_trades(ids):
     """Delete specific trade ids (explicit, targeted — the only thing that deletes)."""
