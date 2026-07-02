@@ -23,12 +23,15 @@ create table if not exists trades (
   signal        text,
   recommended_by text,
   consensus     boolean,
+  manual_mark   double precision,
   notes         text
 );
 
 -- If the trades table already exists, add the accountability columns:
 alter table trades add column if not exists recommended_by text;
 alter table trades add column if not exists consensus boolean;
+-- Manual mark override (price per share typed from the broker for thin names):
+alter table trades add column if not exists manual_mark double precision;
 
 create table if not exists watchlist (
   ticker      text primary key,

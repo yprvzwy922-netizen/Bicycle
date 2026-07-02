@@ -116,11 +116,21 @@ for t in open_t:
         strat = str(t["strategy"])
         prem, ctrs = float(t["premium"] or 0), int(t["contracts"] or 0)
         tkr = t["ticker"]
+        # Manual mark (typed from the broker in the app) beats the live feed
+        mmark = t.get("manual_mark")
+        mmark = float(mmark) if mmark not in (None, "", 0) else None
         # Long Stock: mark vs entry price, per share
         if strat == "Long Stock":
+            if mmark and prem > 0:
+                unreal += (mmark - prem) * ctrs
+                continue
             h = yf.Ticker(tkr).history(period="2d")
             if not h.empty and prem > 0:
                 unreal += (float(h["Close"].iloc[-1]) - prem) * ctrs
+            continue
+        if mmark:
+            is_short = strat not in ("Long Put (Hedge)", "Long Call")
+            unreal += ((prem - mmark) if is_short else (mmark - prem)) * 100 * ctrs
             continue
         strike, expiry = float(t["short_strike"] or 0), t.get("expiry")
         if not strike or not expiry:

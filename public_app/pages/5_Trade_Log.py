@@ -402,20 +402,25 @@ else:
         st.session_state["mod_ctrs"]   = int(row["CONTRACTS"]) if pd.notna(row["CONTRACTS"]) else 1
         st.session_state["mod_prem"]   = float(row["PREMIUM / CREDIT"]) if pd.notna(row["PREMIUM / CREDIT"]) else 0.0
         st.session_state["mod_exp"]    = _cur_exp
+        st.session_state["mod_mark"]   = float(row["MANUAL MARK"]) if pd.notna(row.get("MANUAL MARK")) and row.get("MANUAL MARK") else 0.0
         st.session_state["mod_last_id"] = mod_id
 
-    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1, mc2, mc3, mc4, mc5 = st.columns(5)
     m_strike = mc1.number_input("SHORT STRIKE", min_value=0.0, step=0.50,
                                 disabled=is_stock_row, key="mod_strike")
     m_ctrs   = mc2.number_input("CONTRACTS / SHARES", min_value=1, step=1, key="mod_ctrs")
     m_prem   = mc3.number_input("PREMIUM / ENTRY", min_value=0.0, step=0.01, key="mod_prem")
     m_exp    = mc4.date_input("EXPIRY", disabled=is_stock_row, key="mod_exp")
+    m_mark   = mc5.number_input("MANUAL MARK ($/SHARE)", min_value=0.0, step=0.01, key="mod_mark",
+                                help="Current price from your BROKER for thin names Yahoo can't quote. "
+                                     "Overrides the live mid in P&L/NAV. Set 0 to go back to automatic.")
 
     cu1, cu2, _ = st.columns([2, 2, 6])
     if cu1.button("UPDATE TRADE", type="primary", use_container_width=True):
         idx = trades[trades["ID"] == mod_id].index[0]
         trades.at[idx, "CONTRACTS"]        = m_ctrs
         trades.at[idx, "PREMIUM / CREDIT"] = m_prem
+        trades.at[idx, "MANUAL MARK"]      = float(m_mark) if m_mark > 0 else float("nan")
         if not is_stock_row:
             trades.at[idx, "SHORT STRIKE"] = float(m_strike) if m_strike > 0 else float("nan")
             trades.at[idx, "EXPIRY"]       = m_exp.isoformat()

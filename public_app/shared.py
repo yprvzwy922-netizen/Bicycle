@@ -602,9 +602,15 @@ def compute_book_pnl(trades):
         ctrs  = int(t["CONTRACTS"]) if _pd.notna(t["CONTRACTS"]) else 0
         prem  = float(t["PREMIUM / CREDIT"]) if _pd.notna(t["PREMIUM / CREDIT"]) else 0.0
         tkr   = str(t["TICKER"])
+        # Manual mark (typed from the broker) beats the live feed
+        mmark = None
+        if "MANUAL MARK" in t and _pd.notna(t.get("MANUAL MARK")) and t.get("MANUAL MARK"):
+            mmark = float(t["MANUAL MARK"])
+            if mmark <= 0:
+                mmark = None
         if strat == "Long Stock":
             try:
-                spot = fetch_spot(tkr)
+                spot = mmark if mmark else fetch_spot(tkr)
                 if not np.isnan(spot) and prem > 0:
                     unreal += (spot - prem) * ctrs
             except Exception:
@@ -616,10 +622,13 @@ def compute_book_pnl(trades):
             continue
         is_short = strat not in ("Long Put (Hedge)", "Long Call")
         opt = "put" if "Put" in strat else "call"
-        try:
-            mid, _ = fetch_option_live(tkr, strike, expiry, opt)
-        except Exception:
-            mid = float("nan")
+        if mmark:
+            mid = mmark
+        else:
+            try:
+                mid, _ = fetch_option_live(tkr, strike, expiry, opt)
+            except Exception:
+                mid = float("nan")
         if np.isnan(mid):
             continue
         unreal += (prem - mid) * 100 * ctrs if is_short else (mid - prem) * 100 * ctrs

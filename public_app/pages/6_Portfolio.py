@@ -128,6 +128,15 @@ for _, t in open_trades.iterrows():
         except Exception:
             pass
 
+    # Manual mark (typed from the broker in the Trade Log) beats the live feed —
+    # the fix for thin names Yahoo can't quote (SPCX/NUAI-type strikes).
+    mmark = float(t["MANUAL MARK"]) if pd.notna(t.get("MANUAL MARK")) and t.get("MANUAL MARK") else None
+    if mmark and mmark > 0:
+        if is_stock:
+            spot = mmark            # manual share price
+        else:
+            curr_mid = mmark        # manual option mid
+
     iv_used = float("nan") if is_stock else (live_iv if not np.isnan(live_iv) else 0.35)
 
     # ── Delta (live IV via Black-Scholes) ──────────────────────────────────────
