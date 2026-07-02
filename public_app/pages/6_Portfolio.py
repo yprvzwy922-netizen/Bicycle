@@ -323,18 +323,22 @@ short_opt      = book[(~book["_IS_STOCK"]) & (book["_IS_SHORT"])]
 total_premium  = (pd.to_numeric(short_opt["PREM RECEIVED"], errors="coerce") *
                   pd.to_numeric(short_opt["CONTRACTS"], errors="coerce") * 100).sum()
 
-# Cash & dry powder: total cash = NAV − stock held + cost-to-close open shorts
+# Cash & dry powder: total cash = NAV − stock held + cost-to-close open shorts.
+# IMPORTANT: unmarked positions must use the same assumption NAV uses (flat at
+# entry), otherwise cash is understated by their premium / entry value.
 stock_mv = 0.0
 short_liab = 0.0
 for _, r in book.iterrows():
     if r["_IS_STOCK"]:
         s = r["SPOT"]
-        if s is not None and not (isinstance(s, float) and np.isnan(s)):
-            stock_mv += s * r["CONTRACTS"]
+        if s is None or (isinstance(s, float) and np.isnan(s)):
+            s = r["_PREM"] or 0            # no spot -> NAV assumes entry price
+        stock_mv += s * r["CONTRACTS"]
     elif r["_IS_SHORT"]:
         cm = r["CURRENT MID"]
-        if cm is not None and not (isinstance(cm, float) and np.isnan(cm)):
-            short_liab += cm * 100 * r["CONTRACTS"]
+        if cm is None or (isinstance(cm, float) and np.isnan(cm)):
+            cm = r["_PREM"] or 0           # unmarked -> NAV assumes flat (mid = premium)
+        short_liab += cm * 100 * r["CONTRACTS"]
 acct_cash      = TOTAL_CAPITAL - stock_mv + short_liab
 reserved_cash  = book.loc[~book["_IS_STOCK"], "CASH AT RISK"].sum()
 available_cash = acct_cash - reserved_cash
