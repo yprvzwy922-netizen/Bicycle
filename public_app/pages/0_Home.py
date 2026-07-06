@@ -73,4 +73,31 @@ with col9:
         st.switch_page("pages/7_Fund.py")
 
 st.markdown(" ")
-st.caption("DATA: YFINANCE (FREE, BEST-EFFORT) | MATH: BLACK-SCHOLES EUROPEAN APPROX | NOT EXECUTION READY")
+
+# ── Data feed status ──────────────────────────────────────────────────────────
+import massive
+with st.expander("DATA FEED STATUS (MASSIVE / YFINANCE)"):
+    if massive.configured():
+        st.success("MASSIVE API KEY CONFIGURED — chains, IV and spot come from Massive; "
+                   "yfinance is the fallback + history source.")
+        if st.button("RUN FEED SELF-TEST (AAPL)"):
+            with st.spinner("Testing key entitlements..."):
+                r = massive.self_test("AAPL")
+            if r.get("ok"):
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("EXPIRATIONS", r.get("expirations", 0))
+                c2.metric("CONTRACTS (1ST EXP)", r.get("contracts", 0))
+                c3.metric("BID/ASK QUOTES", "YES" if r.get("has_bid_ask") else "NO")
+                c4.metric("IV / GREEKS", f"{'YES' if r.get('has_iv') else 'NO'} / "
+                                          f"{'YES' if r.get('has_greeks') else 'NO'}")
+                if not r.get("has_bid_ask"):
+                    st.warning("This plan doesn't return bid/ask in snapshots — mids can't be "
+                               "computed from Massive, so pricing falls back to Yahoo. "
+                               "IV/Greeks from Massive still apply.")
+            else:
+                st.error(f"Feed test failed: {r.get('error')}")
+    else:
+        st.info("No MASSIVE_API_KEY in secrets — running fully on yfinance (free, best-effort). "
+                "Add the key in Manage app → Settings → Secrets to switch.")
+
+st.caption("MATH: BLACK-SCHOLES EUROPEAN APPROX | NOT EXECUTION READY")

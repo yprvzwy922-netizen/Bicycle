@@ -116,6 +116,7 @@ SECTORS = sorted(set(w["sector"] for w in DEFAULT_WATCHLIST))
 TICKERS = [w["ticker"] for w in DEFAULT_WATCHLIST]
 
 import db
+import massive
 
 def get_watchlist():
     """DB-backed when Supabase is configured (shared across PCs); else session.
@@ -227,6 +228,11 @@ def rv_percentile(hist):
 # stored for the TTL — the next call retries immediately after recovery.
 @st.cache_data(ttl=300, show_spinner=False)
 def _spot_cached(tkr):
+    if massive.configured():
+        try:
+            return massive.spot(tkr)
+        except Exception:
+            pass                                # fall back to Yahoo
     t = yf.Ticker(tkr)
     info = t.fast_info
     p = getattr(info, "last_price", None) or getattr(info, "regularMarketPrice", None)
@@ -325,6 +331,11 @@ def fetch_earnings(tkr):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _expirations_cached(tkr):
+    if massive.configured():
+        try:
+            return massive.expirations(tkr)
+        except Exception:
+            pass                                # fall back to Yahoo
     exps = list(yf.Ticker(tkr).options)
     if not exps:
         raise RuntimeError("no expirations")   # failures are never cached
@@ -342,10 +353,7 @@ def is_third_friday(d: datetime.date) -> bool:
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _chain_cached(tkr, target_dte, option_type, monthly_only):
-    t = yf.Ticker(tkr)
-    exps = list(t.options)
-    if not exps:
-        raise RuntimeError("no expirations")
+    exps = _expirations_cached(tkr)             # Massive when configured, else Yahoo
     today = datetime.date.today()
 
     # For longer tenors, restrict to standard monthly contracts (3rd Friday),
@@ -360,12 +368,20 @@ def _chain_cached(tkr, target_dte, option_type, monthly_only):
     best = min(candidates, key=lambda e: abs(
         (datetime.datetime.strptime(e, "%Y-%m-%d").date() - today).days - target_dte))
     dte = (datetime.datetime.strptime(best, "%Y-%m-%d").date() - today).days
-    raw = t.option_chain(best)
-    chain = (raw.puts if option_type == "put" else raw.calls).copy()
-    if chain.empty:
-        raise RuntimeError("empty chain")
-    chain["mid"] = (chain["bid"] + chain["ask"]) / 2
-    chain["spread_pct"] = (chain["ask"] - chain["bid"]) / chain["mid"].replace(0, np.nan)
+
+    chain = None
+    if massive.configured():
+        try:
+            chain, _spot = massive.chain(tkr, best, option_type)
+        except Exception:
+            chain = None                        # fall back to Yahoo
+    if chain is None:
+        raw = yf.Ticker(tkr).option_chain(best)
+        chain = (raw.puts if option_type == "put" else raw.calls).copy()
+        if chain.empty:
+            raise RuntimeError("empty chain")
+        chain["mid"] = (chain["bid"] + chain["ask"]) / 2
+        chain["spread_pct"] = (chain["ask"] - chain["bid"]) / chain["mid"].replace(0, np.nan)
     chain["dte"] = dte
     return chain, best, dte
 
@@ -377,6 +393,12 @@ def fetch_chain(tkr, target_dte, option_type="put", monthly_only=False):
 
 @st.cache_data(ttl=120, show_spinner=False)
 def _chain_exact_cached(tkr, expiry, option_type):
+    if massive.configured():
+        try:
+            chain, _spot = massive.chain(tkr, expiry, option_type)
+            return chain
+        except Exception:
+            pass                                # fall back to Yahoo
     raw = yf.Ticker(tkr).option_chain(expiry)
     chain = (raw.puts if option_type == "put" else raw.calls).copy()
     if chain is None or chain.empty:
@@ -607,8 +629,15 @@ def best_bear_call_spread(tkr, short_delta, spread_width_pct, target_dte):
 def _option_live_cached(tkr: str, strike: float, expiry: str, option_type: str):
     # Raises on FETCH failure (not cached); returns (nan, nan) for the
     # legitimate "no usable quote" states, which ARE cached for stability.
-    raw = yf.Ticker(tkr).option_chain(expiry)   # raises if Yahoo blocks/fails
-    chain = raw.puts if option_type == "put" else raw.calls
+    chain = None
+    if massive.configured():
+        try:
+            chain, _spot = massive.chain(tkr, expiry, option_type)
+        except Exception:
+            chain = None                        # fall back to Yahoo
+    if chain is None:
+        raw = yf.Ticker(tkr).option_chain(expiry)   # raises if Yahoo blocks/fails
+        chain = raw.puts if option_type == "put" else raw.calls
     if chain is None or chain.empty:
         return float("nan"), float("nan")
     chain = chain.copy()
