@@ -14,13 +14,21 @@ st.set_page_config(page_title="Options Desk", page_icon=None, layout="wide",
 bbg_style.inject()
 
 # ── Auth (guards every page — pages no longer need their own gate) ────────────
+# FAIL-CLOSED: if the password secret is missing/unreadable, the app LOCKS
+# (with instructions) instead of silently opening.
 PASSWORD = ""
 try:
-    PASSWORD = st.secrets.get("SCREENER_PASSWORD", "")
+    PASSWORD = str(st.secrets.get("SCREENER_PASSWORD", "") or "")
 except Exception:
-    pass
+    PASSWORD = ""
 
-if PASSWORD and not st.session_state.get("authenticated"):
+if not PASSWORD:
+    st.title("OPTIONS DESK")
+    st.error("LOCKED — no password configured. Add SCREENER_PASSWORD to the app's "
+             "Secrets (Manage app → Settings → Secrets), save, and reload.")
+    st.stop()
+
+if not st.session_state.get("authenticated"):
     st.title("OPTIONS DESK")
     st.markdown("---")
     pwd = st.text_input("PASSWORD", type="password")
@@ -31,8 +39,6 @@ if PASSWORD and not st.session_state.get("authenticated"):
         else:
             st.error("INCORRECT PASSWORD")
     st.stop()
-else:
-    st.session_state["authenticated"] = True
 
 # ── Grouped navigation ────────────────────────────────────────────────────────
 PAGES = {
