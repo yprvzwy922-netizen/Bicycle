@@ -11,7 +11,7 @@ import bbg_style
 
 st.set_page_config(page_title="Options Desk", page_icon=None, layout="wide",
                    initial_sidebar_state="expanded")
-bbg_style.inject()
+bbg_style.inject(guard=False)   # entrypoint renders the login itself
 
 # ── Auth (guards every page — pages no longer need their own gate) ────────────
 # FAIL-CLOSED: if the password secret is missing/unreadable, the app LOCKS

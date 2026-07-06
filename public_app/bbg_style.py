@@ -257,5 +257,11 @@ hr {
 </style>
 """
 
-def inject():
+def inject(guard: bool = True):
     st.markdown(BBG_CSS, unsafe_allow_html=True)
+    # DEFENSE IN DEPTH: every page calls inject(), so no page can render
+    # without an authenticated session — independently of the entrypoint gate.
+    # Only the entrypoint itself (which renders the login) passes guard=False.
+    if guard and not st.session_state.get("authenticated"):
+        st.error("LOCKED — open the app and log in.")
+        st.stop()
