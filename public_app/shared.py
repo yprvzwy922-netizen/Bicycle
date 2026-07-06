@@ -407,9 +407,12 @@ def _get_chain_any(tkr, expiry, option_type):
     y["spread_pct"] = (y["ask"] - y["bid"]) / y["mid"]
 
     if m is not None:                               # overlay real IV / Greeks
-        mk  = m["strike"].round(2)
-        miv = m.set_index(mk)["impliedVolatility"]
-        mgd = m.set_index(mk)["greeks_delta"]
+        # Dedupe strikes first — adjusted/non-standard contracts can repeat a
+        # strike, and a duplicated index makes .map() raise (page crash).
+        mu  = m.drop_duplicates(subset="strike", keep="first")
+        mk  = mu["strike"].round(2)
+        miv = mu.set_index(mk)["impliedVolatility"]
+        mgd = mu.set_index(mk)["greeks_delta"]
         yk  = y["strike"].round(2)
         iv_new = yk.map(miv)
         y["impliedVolatility"] = np.where(iv_new.notna() & (iv_new > 0),
@@ -642,10 +645,12 @@ def best_bear_call_spread(tkr, short_delta, spread_width_pct, target_dte):
 def _option_live_cached(tkr: str, strike: float, expiry: str, option_type: str):
     # Raises on FETCH failure (not cached); returns (nan, nan) for the
     # legitimate "no usable quote" states, which ARE cached for stability.
-    # Sourcing: Massive with quotes -> pure Massive; Massive without quotes ->
-    # Yahoo prices + Massive IV overlay; Massive down -> pure Yahoo.
-    chain = _get_chain_any(tkr, expiry, option_type)
-    if chain is None or chain.empty:
+    # Reuses the 120s-cached per-expiry chain, so marking N positions on the
+    # same ticker+expiry costs ONE chain fetch instead of N.
+    chain = fetch_chain_exact(tkr, expiry, option_type)
+    if chain is None:
+        raise RuntimeError("chain unavailable")     # fetch failed -> not cached
+    if chain.empty:
         return float("nan"), float("nan")
     chain = chain.copy()
     chain["dist"] = (chain["strike"] - strike).abs()
