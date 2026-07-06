@@ -82,8 +82,17 @@ h2.metric("BUYBACK (MID)", f"${buy_mid:.2f}" if not np.isnan(buy_mid) else "—"
           help=f"bid {buy_bid:.2f} / ask {buy_ask:.2f} — worst case you pay the ask")
 h3.metric("CURRENT DELTA", f"{cur_delta:.2f}")
 h4.metric("DTE LEFT", cur_dte)
-h5.metric("LEG P&L IF CLOSED", f"${(orig_prem - (buy_mid if not np.isnan(buy_mid) else 0))*100*cts:,.0f}",
+h5.metric("LEG P&L IF CLOSED",
+          f"${(orig_prem - buy_mid)*100*cts:,.0f}" if not np.isnan(buy_mid) else "—",
           help="(original premium − buyback mid) × 100 × contracts — books as realized when you roll")
+
+# The BUYBACK leg must be priceable — without a live two-sided quote every
+# candidate's net credit would be fiction. Stop with a clear message instead.
+if np.isnan(buy_mid) or not (buy_bid > 0 and buy_ask > 0):
+    st.error(f"CAN'T PRICE THE BUYBACK LEG — {tkr} {cur_expiry} K{cur_strike:g} has no live "
+             f"two-sided quote (bid {buy_bid:g} / ask {buy_ask:g}). Get the buyback price from "
+             f"your broker and price this roll manually; scanning candidates without it would be misleading.")
+    st.stop()
 
 st.markdown("---")
 
@@ -107,6 +116,7 @@ if not exps:
 
 # ── Build candidates ──────────────────────────────────────────────────────────
 cands = []
+skipped_quotes = 0
 prog = st.progress(0, text="SCANNING EXPIRIES...")
 for j, e in enumerate(exps):
     ch = fetch_chain_exact(tkr, e, opt_type)
@@ -129,7 +139,10 @@ for j, e in enumerate(exps):
     for _, r in ch.iterrows():
         new_mid = float(r["mid"]) if not np.isnan(r["mid"]) else float("nan")
         new_bid = float(r["bid"])
-        if np.isnan(new_mid) or np.isnan(buy_mid):
+        # The SELL leg needs a real market: a mid AND a live bid (worst case
+        # you sell at the bid — bid 0 means no buyer). Count skips for the user.
+        if np.isnan(new_mid) or new_bid <= 0:
+            skipped_quotes += 1
             continue
         net_mid   = new_mid - buy_mid                     # fair-value roll credit
         net_worst = new_bid - buy_ask                     # cross both spreads
@@ -151,9 +164,16 @@ prog.empty()
 cdf = pd.DataFrame(cands)
 cdf = cdf[cdf["NET CREDIT (MID)"] > 0] if not cdf.empty else cdf   # credit rolls only
 if cdf.empty:
-    st.warning("No credit-roll candidates found (all candidates would be debits). "
-               "Consider buying back instead — don't pay to extend a loser.")
+    if skipped_quotes:
+        st.error(f"NO PRICEABLE CANDIDATES — {skipped_quotes} strike(s) had no live quote "
+                 f"(thin chain). Price this roll at your broker.")
+    else:
+        st.warning("No credit-roll candidates found (all candidates would be debits). "
+                   "Consider buying back instead — don't pay to extend a loser.")
     st.stop()
+if skipped_quotes:
+    st.warning(f"CHECK: {skipped_quotes} candidate strike(s) were excluded — no live quote on the sell leg. "
+               f"If a strike you expected is missing, verify it at the broker.")
 
 # Score: ann yield 50% (capital efficiency first — short cycles + redeploy) +
 # liquidity 20% (OI depth AND spread) + slippage 15% (fraction of the mid
