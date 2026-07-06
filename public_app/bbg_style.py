@@ -137,10 +137,8 @@ button[data-testid="baseButton-primary"] span {
     font-family: 'IBM Plex Mono', monospace !important;
 }
 
-/* ── Slider ── */
-.stSlider > div > div > div > div {
-    background-color: #00c8ff !important;
-}
+/* ── Slider ── (colors come from .streamlit/config.toml theme — the old
+      deep-child selector painted value labels as blue boxes on new Streamlit) */
 
 /* ── Metrics ── */
 [data-testid="metric-container"] {

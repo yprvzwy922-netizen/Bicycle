@@ -155,18 +155,25 @@ if cdf.empty:
                "Consider buying back instead — don't pay to extend a loser.")
     st.stop()
 
-# Score: yield (45) + delta reduction (25) + liquidity (15) + worst-case credit (15)
+# Score: ann yield 50% (capital efficiency first — short cycles + redeploy) +
+# liquidity 20% (OI depth AND spread) + slippage 15% (fraction of the mid
+# credit that survives crossing — relative, so long expiries aren't favored
+# just for having bigger absolute credits) + delta reduction 15%.
 def _mm(s):
     s = s.astype(float)
     rng = s.max() - s.min()
     return pd.Series(1.0, index=s.index) if (rng == 0 or np.isnan(rng)) else (s - s.min()) / rng
 
-cdf["SCORE"] = (0.45 * _mm(cdf["ANN ROLL YIELD"]) +
-                0.25 * (1 - _mm(cdf["NEW DELTA"])) +
-                0.15 * (1 - _mm(cdf["SPREAD %"].fillna(cdf["SPREAD %"].max()))) +
-                0.15 * _mm(cdf["WORST (CROSS)"])) * 100
+liq  = 0.5 * _mm(np.log1p(cdf["OI"].clip(lower=0))) + \
+       0.5 * (1 - _mm(cdf["SPREAD %"].fillna(cdf["SPREAD %"].max())))
+slip = (cdf["WORST (CROSS)"] / cdf["NET CREDIT (MID)"]).clip(lower=0)
+cdf["SCORE"] = (0.50 * _mm(cdf["ANN ROLL YIELD"]) +
+                0.20 * liq +
+                0.15 * _mm(slip) +
+                0.15 * (1 - _mm(cdf["NEW DELTA"]))) * 100
 cdf["SCORE"] = cdf["SCORE"].round(1)
-cdf = cdf.sort_values("SCORE", ascending=False).reset_index(drop=True)
+# Intuitive reading order: nearest expiry first (score stays as the guide)
+cdf = cdf.sort_values(["EXPIRY", "STRIKE"], ascending=[True, False]).reset_index(drop=True)
 
 st.markdown("### ROLL CANDIDATES (CREDIT ONLY)")
 def _sc(v):
@@ -185,13 +192,13 @@ st.dataframe(cdf.style.map(_sc, subset=["SCORE"]).map(_wc, subset=["WORST (CROSS
     "SPREAD %": "{:.1%}", "SCORE": "{:.0f}",
 }, na_rep="—"), use_container_width=True, hide_index=True,
     column_config={"EXPIRY": st.column_config.Column(pinned=True)})
-st.caption("SCORE = ann roll yield (45%) + delta reduction (25%) + liquidity (15%) + worst-case credit (15). "
+st.caption("SORTED BY EXPIRY (nearest first). SCORE = ann roll yield (50%) + liquidity (20%: OI depth + spread) "
+           "+ slippage (15%: share of the mid credit that survives crossing) + delta reduction (15%). "
            "WORST (CROSS) = credit if you cross both bid/asks — red means a cross could turn the roll into a debit. "
            "Manual playbook: roll for a CREDIT at the SAME OR LOWER delta.")
 
 # ── Send to order ticket ──────────────────────────────────────────────────────
 st.markdown("### ADD ROLL TO ORDER TICKET")
-best = cdf.iloc[0]
 opts = [f"{r['EXPIRY']}  K{r['STRIKE']:g}  mid {r['NET CREDIT (MID)']:.2f} (score {r['SCORE']:.0f})"
         for _, r in cdf.iterrows()]
 sel_i = st.selectbox("CANDIDATE", range(len(opts)), format_func=lambda i: opts[i])
