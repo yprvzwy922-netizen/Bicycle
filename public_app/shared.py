@@ -369,19 +369,8 @@ def _chain_cached(tkr, target_dte, option_type, monthly_only):
         (datetime.datetime.strptime(e, "%Y-%m-%d").date() - today).days - target_dte))
     dte = (datetime.datetime.strptime(best, "%Y-%m-%d").date() - today).days
 
-    chain = None
-    if massive.configured():
-        try:
-            chain, _spot = massive.chain(tkr, best, option_type)
-        except Exception:
-            chain = None                        # fall back to Yahoo
-    if chain is None:
-        raw = yf.Ticker(tkr).option_chain(best)
-        chain = (raw.puts if option_type == "put" else raw.calls).copy()
-        if chain.empty:
-            raise RuntimeError("empty chain")
-        chain["mid"] = (chain["bid"] + chain["ask"]) / 2
-        chain["spread_pct"] = (chain["ask"] - chain["bid"]) / chain["mid"].replace(0, np.nan)
+    chain = _get_chain_any(tkr, best, option_type)   # Massive/overlay/Yahoo
+    chain = chain.copy()
     chain["dte"] = dte
     return chain, best, dte
 
@@ -391,22 +380,46 @@ def fetch_chain(tkr, target_dte, option_type="put", monthly_only=False):
     except Exception:
         return None, None, None
 
-@st.cache_data(ttl=120, show_spinner=False)
-def _chain_exact_cached(tkr, expiry, option_type):
+def _get_chain_any(tkr, expiry, option_type):
+    """Best-of-both chain for one exact expiry:
+    - Massive WITH quotes entitled  -> full Massive chain
+    - Massive WITHOUT quotes (e.g. Options Starter) -> Yahoo prices with
+      Massive's REAL IV + Greeks overlaid per strike
+    - No Massive / Massive down     -> pure Yahoo
+    Raises when nothing usable (never cached as failure)."""
+    m = None
     if massive.configured():
         try:
-            chain, _spot = massive.chain(tkr, expiry, option_type)
-            return chain
+            m, _spot = massive.chain(tkr, expiry, option_type)
         except Exception:
-            pass                                # fall back to Yahoo
+            m = None
+    if m is not None and m["mid"].notna().any():
+        return m                                    # quotes entitled: pure Massive
+
     raw = yf.Ticker(tkr).option_chain(expiry)
-    chain = (raw.puts if option_type == "put" else raw.calls).copy()
-    if chain is None or chain.empty:
+    y = (raw.puts if option_type == "put" else raw.calls).copy()
+    if y is None or y.empty:
+        if m is not None:
+            return m                                # analytics-only beats nothing
         raise RuntimeError("empty chain")
-    chain["mid"] = (chain["bid"] + chain["ask"]) / 2
-    chain.loc[chain["mid"] <= 0, "mid"] = np.nan
-    chain["spread_pct"] = (chain["ask"] - chain["bid"]) / chain["mid"]
-    return chain
+    y["mid"] = (y["bid"] + y["ask"]) / 2
+    y.loc[y["mid"] <= 0, "mid"] = np.nan
+    y["spread_pct"] = (y["ask"] - y["bid"]) / y["mid"]
+
+    if m is not None:                               # overlay real IV / Greeks
+        mk  = m["strike"].round(2)
+        miv = m.set_index(mk)["impliedVolatility"]
+        mgd = m.set_index(mk)["greeks_delta"]
+        yk  = y["strike"].round(2)
+        iv_new = yk.map(miv)
+        y["impliedVolatility"] = np.where(iv_new.notna() & (iv_new > 0),
+                                          iv_new, y["impliedVolatility"])
+        y["greeks_delta"] = yk.map(mgd)
+    return y
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _chain_exact_cached(tkr, expiry, option_type):
+    return _get_chain_any(tkr, expiry, option_type)
 
 def fetch_chain_exact(tkr, expiry, option_type="put"):
     """Chain for one EXACT expiry (unlike fetch_chain, which snaps to a target
@@ -629,15 +642,9 @@ def best_bear_call_spread(tkr, short_delta, spread_width_pct, target_dte):
 def _option_live_cached(tkr: str, strike: float, expiry: str, option_type: str):
     # Raises on FETCH failure (not cached); returns (nan, nan) for the
     # legitimate "no usable quote" states, which ARE cached for stability.
-    chain = None
-    if massive.configured():
-        try:
-            chain, _spot = massive.chain(tkr, expiry, option_type)
-        except Exception:
-            chain = None                        # fall back to Yahoo
-    if chain is None:
-        raw = yf.Ticker(tkr).option_chain(expiry)   # raises if Yahoo blocks/fails
-        chain = raw.puts if option_type == "put" else raw.calls
+    # Sourcing: Massive with quotes -> pure Massive; Massive without quotes ->
+    # Yahoo prices + Massive IV overlay; Massive down -> pure Yahoo.
+    chain = _get_chain_any(tkr, expiry, option_type)
     if chain is None or chain.empty:
         return float("nan"), float("nan")
     chain = chain.copy()
