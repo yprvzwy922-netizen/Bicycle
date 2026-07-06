@@ -345,6 +345,22 @@ def fetch_chain(tkr, target_dte, option_type="put", monthly_only=False):
     except Exception:
         return None, None, None
 
+@st.cache_data(ttl=120, show_spinner=False)
+def fetch_chain_exact(tkr, expiry, option_type="put"):
+    """Chain for one EXACT expiry (unlike fetch_chain, which snaps to a target
+    DTE). Used by the Roll Finder, where the current leg's expiry is fixed."""
+    try:
+        raw = yf.Ticker(tkr).option_chain(expiry)
+        chain = (raw.puts if option_type == "put" else raw.calls).copy()
+        if chain is None or chain.empty:
+            return None
+        chain["mid"] = (chain["bid"] + chain["ask"]) / 2
+        chain.loc[chain["mid"] <= 0, "mid"] = np.nan
+        chain["spread_pct"] = (chain["ask"] - chain["bid"]) / chain["mid"]
+        return chain
+    except Exception:
+        return None
+
 def prefetch(tickers, dtes=(35,), option_type="put"):
     """Warm the per-ticker caches concurrently so the screener's main loop
     hits warm caches instead of blocking on sequential network I/O.

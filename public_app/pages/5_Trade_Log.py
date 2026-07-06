@@ -12,17 +12,12 @@ import streamlit as st
 import bbg_style
 import db
 
-st.set_page_config(page_title="Trade Log", layout="wide")
 bbg_style.inject()
 
-if not st.session_state.get("authenticated"):
-    st.warning("Please log in.")
-    if st.button("HOME"): st.switch_page("app.py")
-    st.stop()
 
 c_nav1, _ = st.columns([1, 9])
 with c_nav1:
-    if st.button("HOME"): st.switch_page("app.py")
+    if st.button("HOME"): st.switch_page("pages/0_Home.py")
 
 st.title("TRADE LOG")
 if db.configured():

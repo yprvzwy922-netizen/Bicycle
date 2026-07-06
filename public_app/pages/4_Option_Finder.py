@@ -17,17 +17,12 @@ from shared import (get_watchlist, add_to_watchlist, remove_from_watchlist,
                     fetch_spot, fetch_chain, bs_put_delta, bs_call_delta,
                     ann_yield, ann_roll, moneyness, SECTORS)
 
-st.set_page_config(page_title="Option Finder", layout="wide")
 bbg_style.inject()
 
-if not st.session_state.get("authenticated"):
-    st.warning("Please log in.")
-    if st.button("HOME"): st.switch_page("app.py")
-    st.stop()
 
 c_nav1, _ = st.columns([1,9])
 with c_nav1:
-    if st.button("HOME"): st.switch_page("app.py")
+    if st.button("HOME"): st.switch_page("pages/0_Home.py")
 
 st.title("OPTION FINDER")
 st.caption("FULL CHAIN FOR ANY TICKER | ALL STRIKES | ALL METRICS | ROLL CALCULATOR")

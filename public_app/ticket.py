@@ -14,13 +14,31 @@ def get_ticket() -> list:
 def add_to_ticket(action, ticker, expiry, opt_type, strike, price, contracts):
     """opt_type: 'put'/'call' or 'P'/'C'. expiry: 'YYYY-MM-DD'."""
     get_ticket().append({
-        "action":    action.lower(),                 # sell / buy
+        "kind":      "single",
+        "action":    action.lower(),                 # sell to open / buy to close / ...
         "ticker":    ticker.upper(),
         "expiry":    expiry,                          # ISO; formatted on render
         "type":      "P" if str(opt_type).lower().startswith("p") else "C",
         "strike":    float(strike),
         "price":     float(price),
         "contracts": int(contracts),
+    })
+
+
+def add_roll_to_ticket(ticker, opt_type, contracts,
+                       close_expiry, close_strike,
+                       open_expiry, open_strike, net_credit):
+    """A roll = one line item with two legs, priced as a single net credit."""
+    get_ticket().append({
+        "kind":         "roll",
+        "ticker":       ticker.upper(),
+        "type":         "P" if str(opt_type).lower().startswith("p") else "C",
+        "contracts":    int(contracts),
+        "close_expiry": close_expiry,
+        "close_strike": float(close_strike),
+        "open_expiry":  open_expiry,
+        "open_strike":  float(open_strike),
+        "net_credit":   float(net_credit),
     })
 
 
@@ -52,6 +70,31 @@ def format_line(item) -> str:
             f"at {item['price']:.2f}")
 
 
+def format_roll_block(item, account: str = "") -> str:
+    """Exact roll format:
+    Account L Roll
+    DGXX US buy to close 41 cts 07/17/26 P6
+    DGXX US sell to open 41 cts 08/21/26 P6
+    at 0.40 net credit
+    """
+    hdr = f"Account {account.strip()} Roll" if account.strip() else "Roll"
+    t, cts = item["ticker"], item["contracts"]
+    typ = item["type"]
+    return "\n".join([
+        hdr,
+        f"{t} US buy to close {cts} cts {_fmt_expiry(item['close_expiry'])} {typ}{_fmt_strike(item['close_strike'])}",
+        f"{t} US sell to open {cts} cts {_fmt_expiry(item['open_expiry'])} {typ}{_fmt_strike(item['open_strike'])}",
+        f"at {item['net_credit']:.2f} net credit",
+    ])
+
+
 def format_message(items, account: str = "") -> str:
-    header = f"Account {account}\n" if account.strip() else ""
-    return header + "\n".join("• " + format_line(it) for it in items)
+    singles = [it for it in items if it.get("kind", "single") == "single"]
+    rolls   = [it for it in items if it.get("kind") == "roll"]
+    blocks = []
+    if singles:
+        header = f"Account {account}\n" if account.strip() else ""
+        blocks.append(header + "\n".join("• " + format_line(it) for it in singles))
+    for r in rolls:
+        blocks.append(format_roll_block(r, account))
+    return "\n\n".join(blocks)

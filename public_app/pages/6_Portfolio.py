@@ -15,17 +15,12 @@ from shared import (get_watchlist, fetch_spot, bs_put_delta, bs_call_delta,
                     bs_price, fetch_option_live)
 import datetime
 
-st.set_page_config(page_title="Portfolio & Risk", layout="wide")
 bbg_style.inject()
 
-if not st.session_state.get("authenticated"):
-    st.warning("Please log in.")
-    if st.button("HOME"): st.switch_page("app.py")
-    st.stop()
 
 c_nav1, _ = st.columns([1, 9])
 with c_nav1:
-    if st.button("HOME"): st.switch_page("app.py")
+    if st.button("HOME"): st.switch_page("pages/0_Home.py")
 
 st.title("PORTFOLIO & RISK")
 st.caption("OPEN POSITIONS FROM TRADE LOG | DELTA EXPOSURE | SECTOR LIMITS | RISK GAUGES")

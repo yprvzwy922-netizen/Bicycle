@@ -17,17 +17,12 @@ import bbg_style
 import db
 from shared import compute_book_pnl
 
-st.set_page_config(page_title="Fund & NAV", layout="wide")
 bbg_style.inject()
 
-if not st.session_state.get("authenticated"):
-    st.warning("Please log in.")
-    if st.button("HOME"): st.switch_page("app.py")
-    st.stop()
 
 c_nav1, c_nav2, _ = st.columns([1, 2, 7])
 with c_nav1:
-    if st.button("HOME"): st.switch_page("app.py")
+    if st.button("HOME"): st.switch_page("pages/0_Home.py")
 with c_nav2:
     if st.button("↻ REFRESH DATA", help="Pull the latest snapshots from Supabase (after a manual run)"):
         db.load_fund_snapshots.clear()

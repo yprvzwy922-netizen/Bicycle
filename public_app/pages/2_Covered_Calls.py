@@ -14,17 +14,12 @@ import db
 from shared import (get_watchlist, fetch_spot, fetch_hist, fetch_earnings,
                     best_call, trend_label_score, rv_percentile, prefetch)
 
-st.set_page_config(page_title="Covered Calls", layout="wide")
 bbg_style.inject()
 
-if not st.session_state.get("authenticated"):
-    st.warning("Please log in.")
-    if st.button("HOME"): st.switch_page("app.py")
-    st.stop()
 
 c_nav1, _ = st.columns([1,9])
 with c_nav1:
-    if st.button("HOME"): st.switch_page("app.py")
+    if st.button("HOME"): st.switch_page("pages/0_Home.py")
 
 st.title("COVERED CALL SCREENER")
 st.caption("SELLS CALLS ONLY ON STOCK YOU HOLD | WHEEL = LOWER DELTA (KEEP UPSIDE) | INCOME = HIGHER DELTA (GET CALLED AWAY)")
