@@ -221,16 +221,28 @@ def rv_percentile(hist):
     return float(np.clip((rv.iloc[-1] - lo) / (hi - lo), 0, 1))
 
 # ── Data fetching ─────────────────────────────────────────────────────────────
+# NOTE on the caching pattern below: the cached inner function RAISES on
+# failure (exceptions are never cached by st.cache_data), and the thin outer
+# wrapper converts that to NaN/None. A transient Yahoo block therefore isn't
+# stored for the TTL — the next call retries immediately after recovery.
 @st.cache_data(ttl=300, show_spinner=False)
+def _spot_cached(tkr):
+    t = yf.Ticker(tkr)
+    info = t.fast_info
+    p = getattr(info, "last_price", None) or getattr(info, "regularMarketPrice", None)
+    if p is None:
+        h = t.history(period="2d")
+        if h.empty:
+            raise RuntimeError("no spot data")
+        p = float(h["Close"].iloc[-1])
+    p = float(p)
+    if np.isnan(p):
+        raise RuntimeError("no spot data")
+    return p
+
 def fetch_spot(tkr):
     try:
-        t = yf.Ticker(tkr)
-        info = t.fast_info
-        p = getattr(info, "last_price", None) or getattr(info, "regularMarketPrice", None)
-        if p is None:
-            h = t.history(period="2d")
-            p = float(h["Close"].iloc[-1]) if not h.empty else float("nan")
-        return float(p)
+        return _spot_cached(tkr)
     except Exception:
         return float("nan")
 
@@ -317,47 +329,56 @@ def is_third_friday(d: datetime.date) -> bool:
     return d.weekday() == 4 and 15 <= d.day <= 21
 
 @st.cache_data(ttl=300, show_spinner=False)
+def _chain_cached(tkr, target_dte, option_type, monthly_only):
+    t = yf.Ticker(tkr)
+    exps = list(t.options)
+    if not exps:
+        raise RuntimeError("no expirations")
+    today = datetime.date.today()
+
+    # For longer tenors, restrict to standard monthly contracts (3rd Friday),
+    # which carry the deepest liquidity. Fall back to all if none qualify.
+    candidates = exps
+    if monthly_only:
+        monthlies = [e for e in exps
+                     if is_third_friday(datetime.datetime.strptime(e, "%Y-%m-%d").date())]
+        if monthlies:
+            candidates = monthlies
+
+    best = min(candidates, key=lambda e: abs(
+        (datetime.datetime.strptime(e, "%Y-%m-%d").date() - today).days - target_dte))
+    dte = (datetime.datetime.strptime(best, "%Y-%m-%d").date() - today).days
+    raw = t.option_chain(best)
+    chain = (raw.puts if option_type == "put" else raw.calls).copy()
+    if chain.empty:
+        raise RuntimeError("empty chain")
+    chain["mid"] = (chain["bid"] + chain["ask"]) / 2
+    chain["spread_pct"] = (chain["ask"] - chain["bid"]) / chain["mid"].replace(0, np.nan)
+    chain["dte"] = dte
+    return chain, best, dte
+
 def fetch_chain(tkr, target_dte, option_type="put", monthly_only=False):
     try:
-        t = yf.Ticker(tkr)
-        exps = list(t.options)
-        if not exps: return None, None, None
-        today = datetime.date.today()
-
-        # For longer tenors, restrict to standard monthly contracts (3rd Friday),
-        # which carry the deepest liquidity. Fall back to all if none qualify.
-        candidates = exps
-        if monthly_only:
-            monthlies = [e for e in exps
-                         if is_third_friday(datetime.datetime.strptime(e, "%Y-%m-%d").date())]
-            if monthlies:
-                candidates = monthlies
-
-        best = min(candidates, key=lambda e: abs(
-            (datetime.datetime.strptime(e, "%Y-%m-%d").date() - today).days - target_dte))
-        dte = (datetime.datetime.strptime(best, "%Y-%m-%d").date() - today).days
-        raw = t.option_chain(best)
-        chain = (raw.puts if option_type == "put" else raw.calls).copy()
-        chain["mid"] = (chain["bid"] + chain["ask"]) / 2
-        chain["spread_pct"] = (chain["ask"] - chain["bid"]) / chain["mid"].replace(0, np.nan)
-        chain["dte"] = dte
-        return chain, best, dte
+        return _chain_cached(tkr, target_dte, option_type, monthly_only)
     except Exception:
         return None, None, None
 
 @st.cache_data(ttl=120, show_spinner=False)
+def _chain_exact_cached(tkr, expiry, option_type):
+    raw = yf.Ticker(tkr).option_chain(expiry)
+    chain = (raw.puts if option_type == "put" else raw.calls).copy()
+    if chain is None or chain.empty:
+        raise RuntimeError("empty chain")
+    chain["mid"] = (chain["bid"] + chain["ask"]) / 2
+    chain.loc[chain["mid"] <= 0, "mid"] = np.nan
+    chain["spread_pct"] = (chain["ask"] - chain["bid"]) / chain["mid"]
+    return chain
+
 def fetch_chain_exact(tkr, expiry, option_type="put"):
     """Chain for one EXACT expiry (unlike fetch_chain, which snaps to a target
     DTE). Used by the Roll Finder, where the current leg's expiry is fixed."""
     try:
-        raw = yf.Ticker(tkr).option_chain(expiry)
-        chain = (raw.puts if option_type == "put" else raw.calls).copy()
-        if chain is None or chain.empty:
-            return None
-        chain["mid"] = (chain["bid"] + chain["ask"]) / 2
-        chain.loc[chain["mid"] <= 0, "mid"] = np.nan
-        chain["spread_pct"] = (chain["ask"] - chain["bid"]) / chain["mid"]
-        return chain
+        return _chain_exact_cached(tkr, expiry, option_type)
     except Exception:
         return None
 
@@ -571,33 +592,33 @@ def best_bear_call_spread(tkr, short_delta, spread_width_pct, target_dte):
             "score": round(float(row["score"]), 1)}
 
 @st.cache_data(ttl=60, show_spinner=False)  # 1-min cache — live option prices
+def _option_live_cached(tkr: str, strike: float, expiry: str, option_type: str):
+    # Raises on FETCH failure (not cached); returns (nan, nan) for the
+    # legitimate "no usable quote" states, which ARE cached for stability.
+    raw = yf.Ticker(tkr).option_chain(expiry)   # raises if Yahoo blocks/fails
+    chain = raw.puts if option_type == "put" else raw.calls
+    if chain is None or chain.empty:
+        return float("nan"), float("nan")
+    chain = chain.copy()
+    chain["dist"] = (chain["strike"] - strike).abs()
+    row = chain.loc[chain["dist"].idxmin()]
+    # The exact strike we hold must actually be listed — don't snap to a far
+    # strike (e.g. SPCX has no 150 put, lowest is 162.5). A bogus mark would
+    # corrupt unrealized P&L and NAV. Reject if nearest strike is too far.
+    tol = max(0.015 * strike, 0.50)
+    if float(row["dist"]) > tol:
+        return float("nan"), float("nan")
+    bid, ask = float(row["bid"]), float(row["ask"])
+    if not (bid > 0 and ask > 0):
+        # No reliable two-sided quote -> don't guess with a stale last price.
+        # Leave the position FLAT (marked at entry) so NAV stays stable.
+        return float("nan"), float("nan")
+    return float((bid + ask) / 2), float(row["impliedVolatility"])
+
 def fetch_option_live(tkr: str, strike: float, expiry: str, option_type: str = "put"):
-    """
-    Returns (current_mid, current_iv) for a specific option contract.
-    Used by Portfolio to mark-to-market open positions.
-    """
+    """(current_mid, current_iv) for a specific contract — marks the Portfolio."""
     try:
-        raw = yf.Ticker(tkr).option_chain(expiry)
-        chain = raw.puts if option_type == "put" else raw.calls
-        if chain is None or chain.empty:
-            return float("nan"), float("nan")
-        chain = chain.copy()
-        chain["dist"] = (chain["strike"] - strike).abs()
-        row = chain.loc[chain["dist"].idxmin()]
-        # The exact strike we hold must actually be listed — don't snap to a far
-        # strike (e.g. SPCX has no 150 put, lowest is 162.5). A bogus mark would
-        # corrupt unrealized P&L and NAV. Reject if nearest strike is too far.
-        tol = max(0.015 * strike, 0.50)
-        if float(row["dist"]) > tol:
-            return float("nan"), float("nan")
-        bid, ask = float(row["bid"]), float(row["ask"])
-        if not (bid > 0 and ask > 0):
-            # No reliable two-sided quote -> don't guess with a stale last price.
-            # Leave the position FLAT (marked at entry) so NAV stays stable.
-            return float("nan"), float("nan")
-        mid = (bid + ask) / 2
-        iv  = float(row["impliedVolatility"])
-        return float(mid), iv
+        return _option_live_cached(tkr, strike, expiry, option_type)
     except Exception:
         return float("nan"), float("nan")
 
