@@ -123,7 +123,9 @@ if __name__ == "__main__":
         print(f"{TODAY}: no alerts.")
     else:
         body = f"Position alerts for {TODAY}:\n\n" + "\n".join("• " + a for a in found)
-        print(body)
+        # Public repo -> Actions logs are public. Positions go to EMAIL only.
+        print(f"{TODAY}: {len(found)} alert(s) found — details emailed, not logged. "
+              f"(Configure ALERT_SMTP_* secrets to receive them.)")
         try:
             send_email(body)
         except Exception as e:

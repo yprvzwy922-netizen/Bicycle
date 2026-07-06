@@ -165,7 +165,8 @@ if not should_skip("portfolio_snapshots"):
         "realized_pnl": round(realized, 2),
         "cash_secured": round(cash_sec, 2),
     }], prefer="resolution=merge-duplicates,return=minimal")
-    print(f"portfolio snapshot {TODAY}: open={len(open_t)} unreal=${unreal:,.0f} realized=${realized:,.0f}")
+    # Public repo -> Actions logs are public. Never print dollar values.
+    print(f"portfolio snapshot {TODAY}: open={len(open_t)} — written (values redacted)")
 
 # ── Fund NAV snapshot (unitized) ──────────────────────────────────────────────
 if not should_skip("fund_snapshots"):
@@ -184,6 +185,6 @@ if not should_skip("fund_snapshots"):
             "realized_pnl": round(realized, 2),
             "unreal_pnl": round(unreal, 2),
         }], prefer="resolution=merge-duplicates,return=minimal")
-        print(f"fund snapshot {TODAY}: NAV=${nav:,.0f} units={units:,.2f} nav/unit=${nav_per_unit:,.2f}")
+        print(f"fund snapshot {TODAY}: written (values redacted)")
     except Exception as e:
         print(f"fund snapshot skipped: {e}")

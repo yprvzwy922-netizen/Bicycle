@@ -247,9 +247,15 @@ def fetch_spot(tkr):
         return float("nan")
 
 @st.cache_data(ttl=600, show_spinner=False)
+def _hist_cached(tkr):
+    h = yf.Ticker(tkr).history(period="1y")
+    if h is None or h.empty:
+        raise RuntimeError("no history")     # failures are never cached
+    return h
+
 def fetch_hist(tkr):
     try:
-        return yf.Ticker(tkr).history(period="1y")
+        return _hist_cached(tkr)
     except Exception:
         return pd.DataFrame()
 
@@ -318,9 +324,15 @@ def fetch_earnings(tkr):
     return None
 
 @st.cache_data(ttl=300, show_spinner=False)
+def _expirations_cached(tkr):
+    exps = list(yf.Ticker(tkr).options)
+    if not exps:
+        raise RuntimeError("no expirations")   # failures are never cached
+    return exps
+
 def fetch_expirations(tkr):
     try:
-        return list(yf.Ticker(tkr).options)
+        return _expirations_cached(tkr)
     except Exception:
         return []
 
