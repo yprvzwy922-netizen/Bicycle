@@ -9,7 +9,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import streamlit as st
 import bbg_style
 
-st.set_page_config(page_title="Options Desk", page_icon=None, layout="wide")
+st.set_page_config(page_title="Options Desk", page_icon=None, layout="wide",
+                   initial_sidebar_state="expanded")
 bbg_style.inject()
 
 # ── Auth (guards every page — pages no longer need their own gate) ────────────
@@ -34,7 +35,7 @@ else:
     st.session_state["authenticated"] = True
 
 # ── Grouped navigation ────────────────────────────────────────────────────────
-nav = st.navigation({
+PAGES = {
     "HOME": [
         st.Page("pages/0_Home.py",         title="Home", default=True),
     ],
@@ -53,5 +54,10 @@ nav = st.navigation({
         st.Page("pages/6_Portfolio.py",    title="Portfolio & Risk"),
         st.Page("pages/7_Fund.py",         title="Fund & NAV"),
     ],
-})
+}
+try:
+    # expanded=True keeps every section fully visible (no collapsed menu)
+    nav = st.navigation(PAGES, position="sidebar", expanded=True)
+except TypeError:
+    nav = st.navigation(PAGES)
 nav.run()
