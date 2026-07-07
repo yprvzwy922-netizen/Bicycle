@@ -69,7 +69,7 @@ if rolls:
             st.code(ticket.format_roll_block(r), language=None)
         r["contracts"]  = int(rc2.number_input("CTS", min_value=1, value=int(r["contracts"]),
                                                step=1, key=f"roll_cts_{k}"))
-        r["net_credit"] = float(rc3.number_input("NET CREDIT", min_value=0.0,
+        r["net_credit"] = float(rc3.number_input("NET CREDIT (+) / DEBIT (−)", min_value=-100.0,
                                                  value=float(r["net_credit"]), step=0.05,
                                                  key=f"roll_cr_{k}"))
         rc4.markdown(" "); rc4.markdown(" ")
