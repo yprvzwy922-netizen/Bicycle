@@ -80,11 +80,13 @@ def format_roll_block(item, account: str = "") -> str:
     hdr = f"Account {account.strip()} Roll" if account.strip() else "Roll"
     t, cts = item["ticker"], item["contracts"]
     typ = item["type"]
+    nc  = float(item["net_credit"])
+    px  = f"at {nc:.2f} net credit" if nc >= 0 else f"at {abs(nc):.2f} net debit"
     return "\n".join([
         hdr,
         f"{t} US buy to close {cts} cts {_fmt_expiry(item['close_expiry'])} {typ}{_fmt_strike(item['close_strike'])}",
         f"{t} US sell to open {cts} cts {_fmt_expiry(item['open_expiry'])} {typ}{_fmt_strike(item['open_strike'])}",
-        f"at {item['net_credit']:.2f} net credit",
+        px,
     ])
 
 

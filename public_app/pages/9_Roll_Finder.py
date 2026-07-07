@@ -101,13 +101,17 @@ if not _has_quotes:
 st.markdown("---")
 
 # ── Candidate scan controls ───────────────────────────────────────────────────
-c1, c2, c3 = st.columns(3)
+c1, c2, c3, c4 = st.columns(4)
 n_exp     = c1.slider("EXPIRIES TO SCAN", 1, 8, 4)
 monthlies = c2.checkbox("MONTHLIES ONLY (3rd Friday)", False)
 if opt_type == "put":
     strike_mode = c3.selectbox("STRIKES", ["Same or lower (roll down)", "Same strike only"])
 else:
     strike_mode = c3.selectbox("STRIKES", ["Same or higher (roll up)", "Same strike only"])
+show_debits = c4.checkbox("SHOW DEBIT ROLLS", False,
+                          help="Manual rule: roll for a CREDIT — a debit roll pays new money into a "
+                               "losing trade. Enable only to evaluate a deliberate defensive "
+                               "roll-down (paying to cut assignment risk).")
 
 exps = [e for e in fetch_expirations(tkr) if e > cur_expiry]
 if monthlies:
@@ -166,7 +170,8 @@ for j, e in enumerate(exps):
 prog.empty()
 
 cdf = pd.DataFrame(cands)
-cdf = cdf[cdf["NET CREDIT (MID)"] > 0] if not cdf.empty else cdf   # credit rolls only
+if not cdf.empty and not show_debits:
+    cdf = cdf[cdf["NET CREDIT (MID)"] > 0]     # manual rule: credit rolls only
 if cdf.empty:
     if skipped_quotes:
         st.error(f"NO PRICEABLE CANDIDATES — {skipped_quotes} strike(s) had no live quote "
@@ -200,7 +205,7 @@ cdf["SCORE"] = cdf["SCORE"].round(1)
 # Intuitive reading order: nearest expiry first (score stays as the guide)
 cdf = cdf.sort_values(["EXPIRY", "STRIKE"], ascending=[True, False]).reset_index(drop=True)
 
-st.markdown("### ROLL CANDIDATES (CREDIT ONLY)")
+st.markdown("### ROLL CANDIDATES" + (" — INCLUDING DEBITS" if show_debits else " (CREDIT ONLY)"))
 def _sc(v):
     try:
         f = float(v)
@@ -211,7 +216,7 @@ def _wc(v):
     try: return "color:#00e676" if float(v) > 0 else "color:#ff4444"
     except Exception: return ""
 
-st.dataframe(cdf.style.map(_sc, subset=["SCORE"]).map(_wc, subset=["WORST (CROSS)"]).format({
+st.dataframe(cdf.style.map(_sc, subset=["SCORE"]).map(_wc, subset=["WORST (CROSS)", "NET CREDIT (MID)"]).format({
     "STRIKE": "${:.2f}", "NET CREDIT (MID)": "${:.2f}", "WORST (CROSS)": "${:.2f}",
     "NEW DELTA": "{:.3f}", "Δ DELTA": "{:+.3f}", "ANN ROLL YIELD": "{:.1%}",
     "SPREAD %": "{:.1%}", "SCORE": "{:.0f}",
@@ -239,7 +244,7 @@ if st.session_state.get("roll_last_key") != _ck:
 a1, a2, a3, a4 = st.columns([1.4, 1.4, 1.4, 3])
 r_cts    = a1.number_input("CONTRACTS", min_value=1, max_value=cts, step=1, key="roll_cts",
                            help="Up to the position size — roll part or all")
-r_credit = a2.number_input("NET CREDIT LIMIT", min_value=0.0, step=0.05, key="roll_credit",
+r_credit = a2.number_input("NET CREDIT (+) / DEBIT (−) LIMIT", min_value=-100.0, step=0.05, key="roll_credit",
                            help=f"Mid {cand['NET CREDIT (MID)']:.2f} / worst {cand['WORST (CROSS)']:.2f}. "
                                 f"Start near mid and work down.")
 a3.markdown(" "); a3.markdown(" ")
