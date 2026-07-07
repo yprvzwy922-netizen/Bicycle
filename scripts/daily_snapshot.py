@@ -20,9 +20,41 @@ import yfinance as yf
 
 URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 KEY = os.environ.get("SUPABASE_KEY", "")
+MASSIVE_KEY = os.environ.get("MASSIVE_API_KEY", "")
 
 if not URL or not KEY:
     sys.exit("SUPABASE_URL / SUPABASE_KEY not set")
+
+# ── Massive marking (same price ladder as the app: quote-mid else day close) ──
+_mchain_cache = {}
+
+def massive_mid(tkr, strike, expiry, opt_type):
+    """Mid for one contract from Massive's chain snapshot; None if unavailable.
+    Chains are cached per (ticker, expiry, type) so N positions = 1 call."""
+    if not MASSIVE_KEY:
+        return None
+    ck = (tkr, expiry, opt_type)
+    if ck not in _mchain_cache:
+        m = {}
+        try:
+            r = requests.get(f"https://api.massive.com/v3/snapshot/options/{tkr.upper()}",
+                             params={"expiration_date": expiry, "contract_type": opt_type,
+                                     "limit": 250, "apiKey": MASSIVE_KEY}, timeout=10)
+            r.raise_for_status()
+            for c in r.json().get("results", []):
+                k    = (c.get("details") or {}).get("strike_price")
+                q    = c.get("last_quote") or {}
+                day  = c.get("day") or {}
+                bid  = float(q.get("bid") or 0)
+                ask  = float(q.get("ask") or 0)
+                close = float(day.get("close") or 0)
+                mid = (bid + ask) / 2 if (bid > 0 and ask > 0) else (close if close > 0 else None)
+                if k is not None and mid:
+                    m[round(float(k), 2)] = mid
+        except Exception as e:
+            print(f"  massive chain {tkr} {expiry}: {e}")
+        _mchain_cache[ck] = m
+    return _mchain_cache[ck].get(round(float(strike), 2))
 
 HDRS = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 
@@ -136,22 +168,26 @@ for t in open_t:
         if not strike or not expiry:
             continue
         opt_type = "put" if "Put" in strat else "call"
-        raw = yf.Ticker(tkr).option_chain(expiry)
-        chain = raw.puts if opt_type == "put" else raw.calls
-        if chain is None or chain.empty:
-            continue
-        chain = chain.copy()
-        chain["dist"] = (chain["strike"] - strike).abs()
-        row = chain.loc[chain["dist"].idxmin()]
-        # Don't snap to a strike we don't actually hold, and don't mark a
-        # contract with no quotes — either would corrupt NAV. Leave it flat.
-        if float(row["dist"]) > max(0.015 * strike, 0.50):
-            continue
-        bid, ask = float(row["bid"]), float(row["ask"])
-        if not (bid > 0 and ask > 0):
-            continue                               # no reliable quote -> leave flat
-        mid = (bid + ask) / 2
         is_short = strat not in ("Long Put (Hedge)", "Long Call")
+
+        # Same price ladder as the app: Massive (quote-mid else day close,
+        # works after hours — when this job runs) first, Yahoo fallback.
+        mid = massive_mid(tkr, strike, expiry, opt_type)
+        if mid is None:
+            raw = yf.Ticker(tkr).option_chain(expiry)
+            chain = raw.puts if opt_type == "put" else raw.calls
+            if chain is None or chain.empty:
+                continue
+            chain = chain.copy()
+            chain["dist"] = (chain["strike"] - strike).abs()
+            row = chain.loc[chain["dist"].idxmin()]
+            # Don't snap to a strike we don't hold; no quotes -> leave flat.
+            if float(row["dist"]) > max(0.015 * strike, 0.50):
+                continue
+            bid, ask = float(row["bid"]), float(row["ask"])
+            if not (bid > 0 and ask > 0):
+                continue
+            mid = (bid + ask) / 2
         unreal += ((prem - mid) if is_short else (mid - prem)) * 100 * ctrs
     except Exception as e:
         print(f"  mark {t.get('ticker')}: {e}")
