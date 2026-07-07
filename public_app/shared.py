@@ -6,6 +6,7 @@ No DB dependency — pure yfinance + session_state watchlist.
 import datetime
 import sys, os
 from concurrent.futures import ThreadPoolExecutor
+from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(__file__))
 
 import numpy as np
@@ -380,6 +381,13 @@ def fetch_chain(tkr, target_dte, option_type="put", monthly_only=False, prefer_q
     except Exception:
         return None, None, None
 
+def us_market_open_now() -> bool:
+    """US options RTH (Mon-Fri 9:30-16:00 ET). Holidays aren't special-cased:
+    on a holiday Yahoo quotes are 0/0, so marking falls through to Massive's
+    close anyway — self-healing."""
+    now = datetime.datetime.now(ZoneInfo("America/New_York"))
+    return now.weekday() < 5 and datetime.time(9, 30) <= now.time() < datetime.time(16, 0)
+
 def _massive_chain_or_none(tkr, expiry, option_type):
     if not massive.available():
         return None
@@ -458,8 +466,9 @@ def prefetch_marks(tickers, chain_keys):
     def warm_spot(t):
         try: fetch_spot(t)
         except Exception: pass
+    mkt_open = us_market_open_now()
     def warm_chain(k):
-        try: fetch_chain_exact(*k)
+        try: fetch_chain_exact(*k, prefer_quotes=mkt_open)
         except Exception: pass
     jobs = [(warm_spot, t) for t in set(tickers)] + \
            [(warm_chain, k) for k in set(chain_keys)]
@@ -659,12 +668,14 @@ def best_bear_call_spread(tkr, short_delta, spread_width_pct, target_dte):
             "score": round(float(row["score"]), 1)}
 
 @st.cache_data(ttl=60, show_spinner=False)  # 1-min cache — live option prices
-def _option_live_cached(tkr: str, strike: float, expiry: str, option_type: str):
+def _option_live_cached(tkr: str, strike: float, expiry: str, option_type: str,
+                        market_open: bool = False):
     # Raises on FETCH failure (not cached); returns (nan, nan) for the
     # legitimate "no usable quote" states, which ARE cached for stability.
     # Reuses the 120s-cached per-expiry chain, so marking N positions on the
     # same ticker+expiry costs ONE chain fetch instead of N.
-    chain = fetch_chain_exact(tkr, expiry, option_type)
+    # Market open -> prefer live quote-mids (Yahoo); closed -> Massive close.
+    chain = fetch_chain_exact(tkr, expiry, option_type, prefer_quotes=market_open)
     if chain is None:
         raise RuntimeError("chain unavailable")     # fetch failed -> not cached
     if chain.empty:
@@ -689,7 +700,8 @@ def _option_live_cached(tkr: str, strike: float, expiry: str, option_type: str):
 def fetch_option_live(tkr: str, strike: float, expiry: str, option_type: str = "put"):
     """(current_mid, current_iv) for a specific contract — marks the Portfolio."""
     try:
-        return _option_live_cached(tkr, strike, expiry, option_type)
+        return _option_live_cached(tkr, strike, expiry, option_type,
+                                   us_market_open_now())
     except Exception:
         return float("nan"), float("nan")
 
