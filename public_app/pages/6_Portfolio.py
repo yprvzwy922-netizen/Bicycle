@@ -80,6 +80,18 @@ wl_map = {w["ticker"]: w for w in wl}
 stock_tickers = set(open_trades[open_trades["STRATEGY"] == "Long Stock"]["TICKER"].astype(str))
 
 # ── Enrich with live data ─────────────────────────────────────────────────────
+# Warm all spots + chains in parallel first: the loop then reads warm caches
+# (N serial network calls -> one concurrent burst).
+from shared import prefetch_marks
+_keys = []
+for _, t in open_trades.iterrows():
+    if str(t["STRATEGY"]) != "Long Stock" and pd.notna(t["SHORT STRIKE"]) \
+       and str(t["EXPIRY"]) not in ("nan", "None", ""):
+        _keys.append((str(t["TICKER"]), str(t["EXPIRY"]),
+                      "put" if "Put" in str(t["STRATEGY"]) else "call"))
+with st.spinner("FETCHING MARKET DATA..."):
+    prefetch_marks(open_trades["TICKER"].astype(str).tolist(), _keys)
+
 rows = []
 _n = len(open_trades)
 _prog = st.progress(0, text="MARKING POSITIONS...")

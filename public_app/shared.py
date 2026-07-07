@@ -381,43 +381,25 @@ def fetch_chain(tkr, target_dte, option_type="put", monthly_only=False):
         return None, None, None
 
 def _get_chain_any(tkr, expiry, option_type):
-    """Best-of-both chain for one exact expiry:
-    - Massive WITH quotes entitled  -> full Massive chain
-    - Massive WITHOUT quotes (e.g. Options Starter) -> Yahoo prices with
-      Massive's REAL IV + Greeks overlaid per strike
-    - No Massive / Massive down     -> pure Yahoo
-    Raises when nothing usable (never cached as failure)."""
-    m = None
+    """One chain, ONE fetch. Massive prices via NBBO mid when the plan has
+    quotes, else via the day close (works after hours too) — with real IV,
+    Greeks and OI either way. Yahoo only when Massive is unavailable or
+    returns nothing priceable. Raises when nothing usable (never cached)."""
     if massive.available():
         try:
             m, _spot = massive.chain(tkr, expiry, option_type)
+            if m["mid"].notna().any():
+                return m
         except Exception:
-            m = None
-    if m is not None and m["mid"].notna().any():
-        return m                                    # quotes entitled: pure Massive
+            pass                                    # fall through to Yahoo
 
     raw = yf.Ticker(tkr).option_chain(expiry)
     y = (raw.puts if option_type == "put" else raw.calls).copy()
     if y is None or y.empty:
-        if m is not None:
-            return m                                # analytics-only beats nothing
         raise RuntimeError("empty chain")
     y["mid"] = (y["bid"] + y["ask"]) / 2
     y.loc[y["mid"] <= 0, "mid"] = np.nan
     y["spread_pct"] = (y["ask"] - y["bid"]) / y["mid"]
-
-    if m is not None:                               # overlay real IV / Greeks
-        # Dedupe strikes first — adjusted/non-standard contracts can repeat a
-        # strike, and a duplicated index makes .map() raise (page crash).
-        mu  = m.drop_duplicates(subset="strike", keep="first")
-        mk  = mu["strike"].round(2)
-        miv = mu.set_index(mk)["impliedVolatility"]
-        mgd = mu.set_index(mk)["greeks_delta"]
-        yk  = y["strike"].round(2)
-        iv_new = yk.map(miv)
-        y["impliedVolatility"] = np.where(iv_new.notna() & (iv_new > 0),
-                                          iv_new, y["impliedVolatility"])
-        y["greeks_delta"] = yk.map(mgd)
     return y
 
 @st.cache_data(ttl=120, show_spinner=False)
@@ -450,6 +432,23 @@ def prefetch(tickers, dtes=(35,), option_type="put"):
         return
     with ThreadPoolExecutor(max_workers=min(8, len(tickers))) as ex:
         list(ex.map(warm, tickers))
+
+def prefetch_marks(tickers, chain_keys):
+    """Warm the Portfolio's caches concurrently: spots for `tickers` and
+    per-(tkr, expiry, opt_type) chains for `chain_keys`. The marking loop then
+    reads warm caches instead of doing serial network calls."""
+    def warm_spot(t):
+        try: fetch_spot(t)
+        except Exception: pass
+    def warm_chain(k):
+        try: fetch_chain_exact(*k)
+        except Exception: pass
+    jobs = [(warm_spot, t) for t in set(tickers)] + \
+           [(warm_chain, k) for k in set(chain_keys)]
+    if not jobs:
+        return
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        list(ex.map(lambda j: j[0](j[1]), jobs))
 
 def trend_label_score(hist):
     if hist.empty or len(hist) < 20: return "N/A", 2.5
@@ -661,12 +660,13 @@ def _option_live_cached(tkr: str, strike: float, expiry: str, option_type: str):
     tol = max(0.015 * strike, 0.50)
     if float(row["dist"]) > tol:
         return float("nan"), float("nan")
-    bid, ask = float(row["bid"]), float(row["ask"])
-    if not (bid > 0 and ask > 0):
-        # No reliable two-sided quote -> don't guess with a stale last price.
-        # Leave the position FLAT (marked at entry) so NAV stays stable.
+    # The chain's mid is already the best available price for its source:
+    # NBBO midpoint (quote plans), Massive day close (Starter — valid after
+    # hours too), or Yahoo bid/ask mid. No mid -> leave the position flat.
+    mid = float(row["mid"]) if "mid" in row.index else float("nan")
+    if np.isnan(mid) or mid <= 0:
         return float("nan"), float("nan")
-    return float((bid + ask) / 2), float(row["impliedVolatility"])
+    return mid, float(row["impliedVolatility"])
 
 def fetch_option_live(tkr: str, strike: float, expiry: str, option_type: str = "put"):
     """(current_mid, current_iv) for a specific contract — marks the Portfolio."""

@@ -91,9 +91,9 @@ with st.expander("DATA FEED STATUS (MASSIVE / YFINANCE)"):
                 c4.metric("IV / GREEKS", f"{'YES' if r.get('has_iv') else 'NO'} / "
                                           f"{'YES' if r.get('has_greeks') else 'NO'}")
                 if not r.get("has_bid_ask"):
-                    st.warning("This plan doesn't return bid/ask in snapshots — mids can't be "
-                               "computed from Massive, so pricing falls back to Yahoo. "
-                               "IV/Greeks from Massive still apply.")
+                    st.info("This plan doesn't include NBBO quotes — pricing uses Massive's "
+                            "15-min-delayed DAY CLOSE per contract (works after hours too), "
+                            "with real IV/Greeks. Confirm final prices at the broker as usual.")
             else:
                 st.error(f"Feed test failed: {r.get('error')}")
     else:

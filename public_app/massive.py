@@ -88,15 +88,27 @@ def chain(tkr: str, expiry: str, option_type: str = "put"):
         ua  = c.get("underlying_asset") or {}
         if ua.get("price") is not None:
             spot = float(ua["price"])
-        bid = float(q.get("bid") or 0)
-        ask = float(q.get("ask") or 0)
-        mid = (bid + ask) / 2 if (bid > 0 and ask > 0) else np.nan
+        bid   = float(q.get("bid") or 0)
+        ask   = float(q.get("ask") or 0)
+        close = float(day.get("close") or 0)
+        # Price ladder: NBBO mid (quotes-entitled plans) -> day close (all
+        # plans, 15-min delayed; also the official close when markets are shut)
+        if bid > 0 and ask > 0:
+            mid, px_source, spread = (bid + ask) / 2, "quote", np.nan
+        elif close > 0:
+            mid, px_source, spread = close, "close", np.nan
+        else:
+            mid, px_source, spread = np.nan, "none", np.nan
+        if px_source == "quote":
+            spread = (ask - bid) / mid
         rows.append({
             "strike":            float(det.get("strike_price") or np.nan),
             "bid":               bid,
             "ask":               ask,
             "mid":               mid,
-            "lastPrice":         float(day.get("close") or 0),
+            "px_source":         px_source,
+            "lastPrice":         close,
+            "spread_pct":        spread,
             "impliedVolatility": float(c.get("implied_volatility") or 0),
             "openInterest":      int(c.get("open_interest") or 0),
             "volume":            int(day.get("volume") or 0),
@@ -105,7 +117,6 @@ def chain(tkr: str, expiry: str, option_type: str = "put"):
     df = pd.DataFrame(rows).dropna(subset=["strike"]).sort_values("strike").reset_index(drop=True)
     if df.empty:
         raise RuntimeError("empty chain")
-    df["spread_pct"] = (df["ask"] - df["bid"]) / df["mid"]
     return df, spot
 
 

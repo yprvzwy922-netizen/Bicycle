@@ -86,13 +86,17 @@ h5.metric("LEG P&L IF CLOSED",
           f"${(orig_prem - buy_mid)*100*cts:,.0f}" if not np.isnan(buy_mid) else "—",
           help="(original premium − buyback mid) × 100 × contracts — books as realized when you roll")
 
-# The BUYBACK leg must be priceable — without a live two-sided quote every
-# candidate's net credit would be fiction. Stop with a clear message instead.
-if np.isnan(buy_mid) or not (buy_bid > 0 and buy_ask > 0):
-    st.error(f"CAN'T PRICE THE BUYBACK LEG — {tkr} {cur_expiry} K{cur_strike:g} has no live "
-             f"two-sided quote (bid {buy_bid:g} / ask {buy_ask:g}). Get the buyback price from "
-             f"your broker and price this roll manually; scanning candidates without it would be misleading.")
+# The BUYBACK leg must be priceable (NBBO mid or day close). Without any
+# price, every candidate's net credit would be fiction — stop clearly.
+if np.isnan(buy_mid) or buy_mid <= 0:
+    st.error(f"CAN'T PRICE THE BUYBACK LEG — {tkr} {cur_expiry} K{cur_strike:g} has no usable "
+             f"price (no quote and no session close). Get the buyback price from your broker "
+             f"and price this roll manually.")
     st.stop()
+_has_quotes = buy_bid > 0 and buy_ask > 0
+if not _has_quotes:
+    st.info("PRICING FROM DAY CLOSE (plan has no live quotes) — net credits are close-to-close "
+            "estimates; WORST (CROSS) is unavailable. Confirm final prices at the broker.")
 
 st.markdown("---")
 
@@ -139,13 +143,13 @@ for j, e in enumerate(exps):
     for _, r in ch.iterrows():
         new_mid = float(r["mid"]) if not np.isnan(r["mid"]) else float("nan")
         new_bid = float(r["bid"])
-        # The SELL leg needs a real market: a mid AND a live bid (worst case
-        # you sell at the bid — bid 0 means no buyer). Count skips for the user.
-        if np.isnan(new_mid) or new_bid <= 0:
+        # The SELL leg needs a price (NBBO mid or day close). When quotes are
+        # available, also require a live bid (bid 0 = no buyer right now).
+        if np.isnan(new_mid) or (_has_quotes and new_bid <= 0):
             skipped_quotes += 1
             continue
         net_mid   = new_mid - buy_mid                     # fair-value roll credit
-        net_worst = new_bid - buy_ask                     # cross both spreads
+        net_worst = (new_bid - buy_ask) if (_has_quotes and new_bid > 0) else np.nan
         k_new     = float(r["strike"])
         delta_new = abs(dfn(spot, k_new, float(r["impliedVolatility"]), new_dte))
         cands.append({
@@ -186,7 +190,8 @@ def _mm(s):
 
 liq  = 0.5 * _mm(np.log1p(cdf["OI"].clip(lower=0))) + \
        0.5 * (1 - _mm(cdf["SPREAD %"].fillna(cdf["SPREAD %"].max())))
-slip = (cdf["WORST (CROSS)"] / cdf["NET CREDIT (MID)"]).clip(lower=0)
+# Slippage share; neutral 0.5 when no quotes (close-based pricing has no cross)
+slip = (cdf["WORST (CROSS)"] / cdf["NET CREDIT (MID)"]).clip(lower=0).fillna(0.5)
 cdf["SCORE"] = (0.50 * _mm(cdf["ANN ROLL YIELD"]) +
                 0.20 * liq +
                 0.15 * _mm(slip) +
