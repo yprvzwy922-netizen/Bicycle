@@ -5,12 +5,19 @@ Used automatically by shared.py when MASSIVE_API_KEY exists in st.secrets;
 everything falls back to yfinance otherwise. Functions RAISE on failure so
 callers' no-failure-caching pattern works unchanged.
 """
+import time
+
 import numpy as np
 import pandas as pd
 import requests
 import streamlit as st
 
 BASE = "https://api.massive.com"
+
+# Circuit breaker: after a few consecutive network failures, stop trying
+# Massive for a cooldown so pages don't grind through serial timeouts.
+_FAILS = 0
+_MUTE_UNTIL = 0.0
 
 
 def _key() -> str:
@@ -24,12 +31,25 @@ def configured() -> bool:
     return bool(_key())
 
 
+def available() -> bool:
+    """Configured AND not in the failure cooldown — use this before calls."""
+    return configured() and time.time() >= _MUTE_UNTIL
+
+
 def _get(path_or_url, params=None):
+    global _FAILS, _MUTE_UNTIL
     p = dict(params or {})
     p["apiKey"] = _key()
     url = path_or_url if path_or_url.startswith("http") else f"{BASE}{path_or_url}"
-    r = requests.get(url, params=p, timeout=12)
-    r.raise_for_status()
+    try:
+        r = requests.get(url, params=p, timeout=6)
+        r.raise_for_status()
+    except Exception:
+        _FAILS += 1
+        if _FAILS >= 3:
+            _MUTE_UNTIL = time.time() + 120     # mute Massive for 2 minutes
+        raise
+    _FAILS = 0
     return r.json()
 
 

@@ -228,7 +228,7 @@ def rv_percentile(hist):
 # stored for the TTL — the next call retries immediately after recovery.
 @st.cache_data(ttl=300, show_spinner=False)
 def _spot_cached(tkr):
-    if massive.configured():
+    if massive.available():
         try:
             return massive.spot(tkr)
         except Exception:
@@ -331,7 +331,7 @@ def fetch_earnings(tkr):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _expirations_cached(tkr):
-    if massive.configured():
+    if massive.available():
         try:
             return massive.expirations(tkr)
         except Exception:
@@ -388,7 +388,7 @@ def _get_chain_any(tkr, expiry, option_type):
     - No Massive / Massive down     -> pure Yahoo
     Raises when nothing usable (never cached as failure)."""
     m = None
-    if massive.configured():
+    if massive.available():
         try:
             m, _spot = massive.chain(tkr, expiry, option_type)
         except Exception:

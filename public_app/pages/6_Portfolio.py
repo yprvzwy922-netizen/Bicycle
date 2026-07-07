@@ -81,7 +81,10 @@ stock_tickers = set(open_trades[open_trades["STRATEGY"] == "Long Stock"]["TICKER
 
 # ── Enrich with live data ─────────────────────────────────────────────────────
 rows = []
-for _, t in open_trades.iterrows():
+_n = len(open_trades)
+_prog = st.progress(0, text="MARKING POSITIONS...")
+for _i, (_, t) in enumerate(open_trades.iterrows()):
+    _prog.progress((_i + 1) / _n, text=f"MARKING {t['TICKER']} ({_i + 1}/{_n})...")
     tkr = str(t["TICKER"])
     try:
         spot = fetch_spot(tkr)
@@ -291,6 +294,7 @@ for _, t in open_trades.iterrows():
         "_DTE_REM":      dte_rem if dte_rem is not None else 0,
     })
 
+_prog.empty()
 book = pd.DataFrame(rows)
 
 # ── Capital base = the actual fund (contributions + realized + unrealized) ─────
