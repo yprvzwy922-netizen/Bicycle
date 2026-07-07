@@ -329,7 +329,7 @@ def fetch_earnings(tkr):
         return (future[0] - today).days
     return None
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)   # expiry lists barely change intraday
 def _expirations_cached(tkr):
     if massive.available():
         try:
