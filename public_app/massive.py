@@ -53,13 +53,17 @@ def _get(path_or_url, params=None):
     return r.json()
 
 
-def _snapshot_results(tkr, params):
-    """Paginated option-chain snapshot for an underlying."""
+def _snapshot_results(tkr, params, max_pages=8):
+    """Paginated option-chain snapshot for an underlying. Hard page cap: one
+    expiry+type fits in 1-2 pages of 250 — anything more means runaway
+    pagination (a limit=1 request returns a next_url for EVERY contract)."""
     data = _get(f"/v3/snapshot/options/{tkr.upper()}", params)
     results = list(data.get("results", []))
-    while data.get("next_url"):
+    pages = 1
+    while data.get("next_url") and pages < max_pages:
         data = _get(data["next_url"])
         results += data.get("results", [])
+        pages += 1
     return results
 
 
@@ -125,9 +129,11 @@ def expirations(tkr: str):
 
 
 def spot(tkr: str) -> float:
-    """Underlying price via a 1-contract chain snapshot (no Stocks plan needed)."""
-    results = _snapshot_results(tkr, {"limit": 1})
-    for c in results:
+    """Underlying price via a 1-contract chain snapshot (no Stocks plan needed).
+    SINGLE request — never follow pagination here (limit=1 offers a next_url
+    for every contract on the underlying; following it = thousands of calls)."""
+    data = _get(f"/v3/snapshot/options/{tkr.upper()}", {"limit": 1})
+    for c in data.get("results", []):
         ua = c.get("underlying_asset") or {}
         if ua.get("price") is not None:
             return float(ua["price"])
