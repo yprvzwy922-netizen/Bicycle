@@ -171,7 +171,10 @@ if not st.session_state.get("finder_loaded"):
 with st.spinner(f"FETCHING {ticker}..."):
     spot = fetch_spot(ticker)
     opt  = "put" if opt_type == "PUTS" else "call"
-    chain, expiry, dte = fetch_chain(ticker, target_dte, opt, monthly_only=monthly_only)
+    # prefer_quotes: this page prices ORDERS -> needs real bid/ask (Yahoo
+    # first); Massive close-pricing only as fallback
+    chain, expiry, dte = fetch_chain(ticker, target_dte, opt,
+                                     monthly_only=monthly_only, prefer_quotes=True)
 
 if chain is None or chain.empty:
     st.error(f"No options data found for {ticker}.")

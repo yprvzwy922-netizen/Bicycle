@@ -53,7 +53,7 @@ opt_type   = "put" if "Put" in str(pos["STRATEGY"]) else "call"
 # ── Current leg: buyback cost ─────────────────────────────────────────────────
 with st.spinner(f"FETCHING {tkr} CHAINS..."):
     spot = fetch_spot(tkr)
-    cur_chain = fetch_chain_exact(tkr, cur_expiry, opt_type)
+    cur_chain = fetch_chain_exact(tkr, cur_expiry, opt_type, prefer_quotes=True)
 
 if cur_chain is None or np.isnan(spot):
     st.error(f"Couldn't fetch the current chain for {tkr} {cur_expiry}. Try REFRESH or later.")
@@ -123,7 +123,7 @@ cands = []
 skipped_quotes = 0
 prog = st.progress(0, text="SCANNING EXPIRIES...")
 for j, e in enumerate(exps):
-    ch = fetch_chain_exact(tkr, e, opt_type)
+    ch = fetch_chain_exact(tkr, e, opt_type, prefer_quotes=True)
     prog.progress((j + 1) / len(exps), text=f"SCANNING {e}...")
     if ch is None:
         continue

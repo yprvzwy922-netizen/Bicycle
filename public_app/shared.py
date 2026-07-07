@@ -352,7 +352,7 @@ def is_third_friday(d: datetime.date) -> bool:
     return d.weekday() == 4 and 15 <= d.day <= 21
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _chain_cached(tkr, target_dte, option_type, monthly_only):
+def _chain_cached(tkr, target_dte, option_type, monthly_only, prefer_quotes=False):
     exps = _expirations_cached(tkr)             # Massive when configured, else Yahoo
     today = datetime.date.today()
 
@@ -369,30 +369,27 @@ def _chain_cached(tkr, target_dte, option_type, monthly_only):
         (datetime.datetime.strptime(e, "%Y-%m-%d").date() - today).days - target_dte))
     dte = (datetime.datetime.strptime(best, "%Y-%m-%d").date() - today).days
 
-    chain = _get_chain_any(tkr, best, option_type)   # Massive/overlay/Yahoo
+    chain = _get_chain_any(tkr, best, option_type, prefer_quotes)
     chain = chain.copy()
     chain["dte"] = dte
     return chain, best, dte
 
-def fetch_chain(tkr, target_dte, option_type="put", monthly_only=False):
+def fetch_chain(tkr, target_dte, option_type="put", monthly_only=False, prefer_quotes=False):
     try:
-        return _chain_cached(tkr, target_dte, option_type, monthly_only)
+        return _chain_cached(tkr, target_dte, option_type, monthly_only, prefer_quotes)
     except Exception:
         return None, None, None
 
-def _get_chain_any(tkr, expiry, option_type):
-    """One chain, ONE fetch. Massive prices via NBBO mid when the plan has
-    quotes, else via the day close (works after hours too) — with real IV,
-    Greeks and OI either way. Yahoo only when Massive is unavailable or
-    returns nothing priceable. Raises when nothing usable (never cached)."""
-    if massive.available():
-        try:
-            m, _spot = massive.chain(tkr, expiry, option_type)
-            if m["mid"].notna().any():
-                return m
-        except Exception:
-            pass                                    # fall through to Yahoo
+def _massive_chain_or_none(tkr, expiry, option_type):
+    if not massive.available():
+        return None
+    try:
+        m, _spot = massive.chain(tkr, expiry, option_type)
+        return m if m["mid"].notna().any() else None
+    except Exception:
+        return None
 
+def _yahoo_chain(tkr, expiry, option_type):
     raw = yf.Ticker(tkr).option_chain(expiry)
     y = (raw.puts if option_type == "put" else raw.calls).copy()
     if y is None or y.empty:
@@ -402,15 +399,36 @@ def _get_chain_any(tkr, expiry, option_type):
     y["spread_pct"] = (y["ask"] - y["bid"]) / y["mid"]
     return y
 
-@st.cache_data(ttl=120, show_spinner=False)
-def _chain_exact_cached(tkr, expiry, option_type):
-    return _get_chain_any(tkr, expiry, option_type)
+def _get_chain_any(tkr, expiry, option_type, prefer_quotes=False):
+    """One chain, one fetch, source by purpose:
+    - prefer_quotes=False (Portfolio marks, screeners): Massive first — day
+      close pricing (works after hours) + real IV/Greeks; Yahoo fallback.
+    - prefer_quotes=True (Option Finder, Roll Finder — pages that PRICE
+      ORDERS and need bid/ask): Yahoo first; Massive close as fallback so
+      the tools still work when Yahoo is down or after hours.
+    Raises when nothing usable (never cached as failure)."""
+    if prefer_quotes:
+        try:
+            return _yahoo_chain(tkr, expiry, option_type)
+        except Exception:
+            m = _massive_chain_or_none(tkr, expiry, option_type)
+            if m is not None:
+                return m
+            raise
+    m = _massive_chain_or_none(tkr, expiry, option_type)
+    if m is not None:
+        return m
+    return _yahoo_chain(tkr, expiry, option_type)
 
-def fetch_chain_exact(tkr, expiry, option_type="put"):
+@st.cache_data(ttl=120, show_spinner=False)
+def _chain_exact_cached(tkr, expiry, option_type, prefer_quotes=False):
+    return _get_chain_any(tkr, expiry, option_type, prefer_quotes)
+
+def fetch_chain_exact(tkr, expiry, option_type="put", prefer_quotes=False):
     """Chain for one EXACT expiry (unlike fetch_chain, which snaps to a target
     DTE). Used by the Roll Finder, where the current leg's expiry is fixed."""
     try:
-        return _chain_exact_cached(tkr, expiry, option_type)
+        return _chain_exact_cached(tkr, expiry, option_type, prefer_quotes)
     except Exception:
         return None
 
