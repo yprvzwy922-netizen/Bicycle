@@ -15,7 +15,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import bbg_style
 import db
-from shared import compute_book_pnl
+from shared import compute_book_pnl, fetch_hist
 
 bbg_style.inject()
 
@@ -207,6 +207,45 @@ if db.configured():
             xaxis=dict(gridcolor="#1e1e1e", type="category"),
             yaxis=dict(gridcolor="#1e1e1e", tickprefix="$"))
         st.plotly_chart(fig2, use_container_width=True)
+
+        # ── Fund vs Nasdaq benchmark (indexed) ───────────────────────────────
+        # QQQ closes are mapped onto the existing snapshot dates at render
+        # time (no schema change; works for all past points).
+        qqq_hist = fetch_hist("QQQ")
+        if not qqq_hist.empty and len(fs) >= 2:
+            closes = {d.isoformat(): float(c)
+                      for d, c in zip(qqq_hist.index.date, qqq_hist["Close"])}
+            bench = fs[["snap_date", "nav_per_unit"]].copy()
+            bench["qqq"] = bench["snap_date"].map(closes)
+            bench = bench.dropna().reset_index(drop=True)
+            if len(bench) >= 2:
+                f0, q0 = float(bench["nav_per_unit"].iloc[0]), float(bench["qqq"].iloc[0])
+                fund_idx  = bench["nav_per_unit"] / f0 * 100
+                qqq_idx   = bench["qqq"] / q0 * 100
+                basket_2x = 100 * (1 + 2 * (bench["qqq"] / q0 - 1))   # beta≈2 basket proxy
+
+                st.markdown("### FUND vs NASDAQ — INDEXED TO 100")
+                fig3 = go.Figure()
+                fig3.add_scatter(x=bench["snap_date"], y=basket_2x, name="2× QQQ (≈ YOUR BASKET)",
+                                 mode="lines", line=dict(color="#666666", width=1, dash="dot"))
+                fig3.add_scatter(x=bench["snap_date"], y=qqq_idx, name="QQQ",
+                                 mode="lines+markers", line=dict(color="#ff9900", width=2))
+                fig3.add_scatter(x=bench["snap_date"], y=fund_idx, name="FUND (NAV/UNIT)",
+                                 mode="lines+markers", line=dict(color="#00c8ff", width=2))
+                fig3.add_hline(y=100, line_color="#444444", line_dash="dot")
+                fig3.update_layout(
+                    paper_bgcolor="#0a0a0a", plot_bgcolor="#0d0d0d",
+                    font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
+                    legend=dict(orientation="h", y=1.14),
+                    margin=dict(l=40, r=20, t=30, b=40), height=340,
+                    xaxis=dict(gridcolor="#1e1e1e", type="category"),
+                    yaxis=dict(gridcolor="#1e1e1e"))
+                st.plotly_chart(fig3, use_container_width=True)
+                d_f, d_q = fund_idx.iloc[-1] - 100, qqq_idx.iloc[-1] - 100
+                st.caption(f"Since first snapshot: FUND {d_f:+.1f}% vs QQQ {d_q:+.1f}% "
+                           f"(implied ≈β2 basket {2*d_q:+.1f}%). Blue above grey in a selloff = the "
+                           f"premium cushion absorbing beta — the strategy doing its job. Expect blue "
+                           f"to LAG in strong rallies (capped upside): judge over full cycles.")
     else:
         st.markdown("---")
         st.info("NAV history will appear here once the daily snapshot job has run "
