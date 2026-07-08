@@ -86,18 +86,21 @@ with c1:
     if custom: st.session_state["finder_ticker"] = custom
     ticker = st.session_state.get("finder_ticker", "")
 with c2:
-    tenor = st.selectbox("TENOR", ["1M (~30 DTE)","45 DAYS","3M (MONTHLY)","6M (MONTHLY)","CUSTOM"])
+    tenor = st.selectbox("TENOR", ["1M (~30 DTE)","45 DAYS","3M (MONTHLY)","6M (MONTHLY)","CUSTOM"],
+                         key="finder_tenor")
     dte_map = {"1M (~30 DTE)":30,"45 DAYS":45,"3M (MONTHLY)":90,"6M (MONTHLY)":180}
     # 3M / 6M snap to the standard 3rd-Friday monthly contract (deepest liquidity)
     monthly_only = tenor in ("3M (MONTHLY)","6M (MONTHLY)")
     if tenor == "CUSTOM":
-        target_dte = st.number_input("CUSTOM DTE", min_value=7, max_value=730, value=35, step=1)
+        target_dte = st.number_input("CUSTOM DTE", min_value=7, max_value=730, value=35, step=1,
+                                     key="finder_custom_dte")
     else:
         target_dte = dte_map[tenor]
 with c3:
-    opt_type = st.selectbox("OPTION TYPE", ["PUTS","CALLS"])
+    opt_type = st.selectbox("OPTION TYPE", ["PUTS","CALLS"], key="finder_opt_type")
 with c4:
-    band_label = st.selectbox("DELTA BAND", ["INCOME 0.15-0.30","WHEEL 0.30-0.45","ALL (0.10-0.70)"])
+    band_label = st.selectbox("DELTA BAND", ["INCOME 0.15-0.30","WHEEL 0.30-0.45","ALL (0.10-0.70)"],
+                              key="finder_band")
     lo = {"INCOME 0.15-0.30":0.15,"WHEEL 0.30-0.45":0.30}.get(band_label, 0.10)
     hi = {"INCOME 0.15-0.30":0.30,"WHEEL 0.30-0.45":0.45}.get(band_label, 0.70)
 with c5:
