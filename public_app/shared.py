@@ -96,7 +96,7 @@ DEFAULT_WATCHLIST = [
     {"ticker": "ETN",   "company": "Eaton",                   "sector": "Energy & Power",       "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
     {"ticker": "ABBV",  "company": "AbbVie",                  "sector": "Healthcare",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
     # ── Growth complements: liquid, on-theme, frequent setups ──────────────────
-    {"ticker": "PLTR",  "company": "Palantir",                "sector": "Technology",           "bucket": "Growth",      "conviction": 3, "delta_band": "Wheel"},
+    {"ticker": "PLTR",  "company": "Palantir",                "sector": "Technology",           "bucket": "Core",        "conviction": 4, "delta_band": "Wheel"},
     {"ticker": "DELL",  "company": "Dell Technologies",       "sector": "Data Centers & AI",    "bucket": "Growth",      "conviction": 3, "delta_band": "Wheel"},
     {"ticker": "SMCI",  "company": "Super Micro Computer",    "sector": "Data Centers & AI",    "bucket": "Growth",      "conviction": 2, "delta_band": "Income"},
     # ── Added 2026-06-25: premium machines + diversifiers (lower AI correlation) ─
