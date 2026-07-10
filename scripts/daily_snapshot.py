@@ -56,6 +56,31 @@ def massive_mid(tkr, strike, expiry, opt_type):
         _mchain_cache[ck] = m
     return _mchain_cache[ck].get(round(float(strike), 2))
 
+def yahoo_mid(tkr, strike, expiry, opt_type):
+    """Two-sided bid/ask mid from Yahoo; None if strike unlisted or one-sided."""
+    try:
+        raw = yf.Ticker(tkr).option_chain(expiry)
+        chain = raw.puts if opt_type == "put" else raw.calls
+        if chain is None or chain.empty:
+            return None
+        chain = chain.copy()
+        chain["dist"] = (chain["strike"] - strike).abs()
+        row = chain.loc[chain["dist"].idxmin()]
+        if float(row["dist"]) > max(0.015 * strike, 0.50):
+            return None
+        bid, ask = float(row["bid"]), float(row["ask"])
+        return (bid + ask) / 2 if (bid > 0 and ask > 0) else None
+    except Exception:
+        return None
+
+def mark_mid(tkr, strike, expiry, opt_type):
+    """Mirror the app's time-aware ladder EXACTLY so header and snapshot agree:
+    market hours -> Yahoo mid first (Massive fallback); closed -> Massive close
+    first (Yahoo fallback)."""
+    if US_RTH:
+        return yahoo_mid(tkr, strike, expiry, opt_type) or massive_mid(tkr, strike, expiry, opt_type)
+    return massive_mid(tkr, strike, expiry, opt_type) or yahoo_mid(tkr, strike, expiry, opt_type)
+
 HDRS = {"apikey": KEY, "Authorization": f"Bearer {KEY}", "Content-Type": "application/json"}
 
 def rest(method, table, params=None, json=None, prefer=None):
@@ -91,6 +116,8 @@ TODAY_ET = datetime.datetime.now(ZoneInfo("America/New_York")).date().isoformat(
 # session — never overwrite it. Only the live (current) day may be rewritten
 # (intraday -> close). This keeps stored history immutable.
 IS_PAST_DAY = TODAY < TODAY_ET
+_now_et = datetime.datetime.now(ZoneInfo("America/New_York"))
+US_RTH = _now_et.weekday() < 5 and datetime.time(9, 30) <= _now_et.time() < datetime.time(16, 0)
 print(f"snapshot date: {TODAY}  (today ET: {TODAY_ET}, past-day lock: {IS_PAST_DAY})")
 
 def already_stored(table):
@@ -170,24 +197,10 @@ for t in open_t:
         opt_type = "put" if "Put" in strat else "call"
         is_short = strat not in ("Long Put (Hedge)", "Long Call")
 
-        # Same price ladder as the app: Massive (quote-mid else day close,
-        # works after hours — when this job runs) first, Yahoo fallback.
-        mid = massive_mid(tkr, strike, expiry, opt_type)
+        # Identical time-aware ladder to the live app header (mark_mid).
+        mid = mark_mid(tkr, strike, expiry, opt_type)
         if mid is None:
-            raw = yf.Ticker(tkr).option_chain(expiry)
-            chain = raw.puts if opt_type == "put" else raw.calls
-            if chain is None or chain.empty:
-                continue
-            chain = chain.copy()
-            chain["dist"] = (chain["strike"] - strike).abs()
-            row = chain.loc[chain["dist"].idxmin()]
-            # Don't snap to a strike we don't hold; no quotes -> leave flat.
-            if float(row["dist"]) > max(0.015 * strike, 0.50):
-                continue
-            bid, ask = float(row["bid"]), float(row["ask"])
-            if not (bid > 0 and ask > 0):
-                continue
-            mid = (bid + ask) / 2
+            continue                               # no usable price -> leave flat
         unreal += ((prem - mid) if is_short else (mid - prem)) * 100 * ctrs
     except Exception as e:
         print(f"  mark {t.get('ticker')}: {e}")
