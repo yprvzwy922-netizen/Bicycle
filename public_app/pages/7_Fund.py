@@ -150,6 +150,72 @@ if db.configured():
         fs["nav"]          = pd.to_numeric(fs["nav"], errors="coerce")
         fs["nav_per_unit"] = pd.to_numeric(fs["nav_per_unit"], errors="coerce")
 
+        # ── Performance tear sheet (fund-only, from NAV/unit) ────────────────
+        st.markdown("---")
+        st.markdown("### PERFORMANCE")
+        RF = 0.045                                    # risk-free (T-bill) for Sharpe/Sortino
+        npu = fs["nav_per_unit"].dropna().reset_index(drop=True)
+        if len(npu) >= 2:
+            rets = npu.pct_change().dropna()
+            try:
+                d0 = datetime.date.fromisoformat(str(fs["snap_date"].iloc[0]))
+                d1 = datetime.date.fromisoformat(str(fs["snap_date"].iloc[-1]))
+                cal_days = max((d1 - d0).days, 1)
+            except Exception:
+                cal_days = max(len(npu) - 1, 1)
+
+            total_ret = npu.iloc[-1] / npu.iloc[0] - 1
+            cagr      = (npu.iloc[-1] / npu.iloc[0]) ** (365.0 / cal_days) - 1
+            ann_vol   = rets.std(ddof=1) * np.sqrt(252) if len(rets) > 1 else np.nan
+            excess    = rets - RF / 252.0
+            sharpe    = (excess.mean() / rets.std(ddof=1) * np.sqrt(252)
+                         if len(rets) > 1 and rets.std(ddof=1) > 0 else np.nan)
+            dvol      = np.sqrt((rets.clip(upper=0) ** 2).mean())        # downside deviation
+            sortino   = (excess.mean() / dvol * np.sqrt(252)) if dvol > 0 else np.nan
+            dd        = npu / npu.cummax() - 1
+            max_dd    = float(dd.min())
+            calmar    = (cagr / abs(max_dd)) if max_dd < 0 else np.nan
+            pct_pos   = float((rets > 0).mean())
+
+            def _f(x, pct=False, sfx=""):
+                if x is None or (isinstance(x, float) and (np.isnan(x) or np.isinf(x))):
+                    return "—"
+                return f"{x:.1%}" if pct else f"{x:.2f}{sfx}"
+
+            r1 = st.columns(4)
+            r1[0].metric("TOTAL RETURN", _f(total_ret, pct=True), help="NAV/unit since first snapshot")
+            r1[1].metric("ANN. RETURN (CAGR)", _f(cagr, pct=True), help="Calendar-annualized; noisy on short history")
+            r1[2].metric("ANN. VOLATILITY", _f(ann_vol, pct=True))
+            r1[3].metric("MAX DRAWDOWN", _f(max_dd, pct=True), help="Worst peak-to-trough on NAV/unit")
+            r2 = st.columns(4)
+            r2[0].metric("SHARPE", _f(sharpe), help=f"(ann. return − {RF:.1%} rf) / ann. vol")
+            r2[1].metric("SORTINO", _f(sortino), help="Uses downside deviation only — fairer to premium-selling")
+            r2[2].metric("CALMAR", _f(calmar), help="CAGR / |max drawdown|")
+            r2[3].metric("% POSITIVE DAYS", _f(pct_pos, pct=True))
+
+            # Closed-trade stats (meaningful even with short history)
+            cl = trades[trades["STATUS"].isin(
+                ["CLOSED","EXPIRED WORTHLESS (MAX PROFIT)","CLOSED EARLY",
+                 "ASSIGNED / EXERCISED","ROLLED","STOP LOSS HIT"])].copy() if not trades.empty else pd.DataFrame()
+            rp = pd.to_numeric(cl["REALIZED PNL"], errors="coerce").dropna() if not cl.empty else pd.Series(dtype=float)
+            if len(rp):
+                wins, losses = rp[rp > 0], rp[rp < 0]
+                pf = (wins.sum() / abs(losses.sum())) if losses.sum() != 0 else np.nan
+                t = st.columns(4)
+                t[0].metric("WIN RATE", f"{len(wins)/len(rp):.0%}", help=f"{len(rp)} closed trades")
+                t[1].metric("AVG WIN", f"${wins.mean():,.0f}" if len(wins) else "—")
+                t[2].metric("AVG LOSS", f"${losses.mean():,.0f}" if len(losses) else "—")
+                t[3].metric("PROFIT FACTOR", _f(pf), help="Gross wins / gross losses (>1 = profitable)")
+
+            # Track-record honesty banner (auto-lifts as history matures)
+            if cal_days < 540:
+                st.warning(f"⚠ PRELIMINARY — {cal_days} calendar days / {len(npu)} snapshots. Ratios "
+                           f"annualize short history and are NOT yet statistically meaningful (need "
+                           f"~18–24 months). Note: Sharpe flatters premium-selling — always read it "
+                           f"beside MAX DRAWDOWN. Not an audited track record.")
+        else:
+            st.info("Performance metrics appear once ≥2 daily snapshots exist.")
+
         st.markdown("---")
         st.markdown("### FUND VALUE ($) — HISTORY")
 
