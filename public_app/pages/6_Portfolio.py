@@ -415,6 +415,8 @@ def color_action(v):
 
 fmt = {
     "SPOT":          "${:.2f}",
+    "DTE LEFT":      "{:.0f}",      # stock rows have no expiry (NaN -> "—"); options show whole days
+    "CONTRACTS":     "{:.0f}",
     "SHORT STRIKE":  "${:.2f}",
     "BREAKEVEN":     "${:.2f}",
     "PREM RECEIVED": "${:.2f}",
