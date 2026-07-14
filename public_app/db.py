@@ -73,6 +73,12 @@ def _clean(records):
             return None
         if isinstance(v, str) and v.strip().lower() == "nan":
             return None
+        # pandas upcasts int columns to float when a None/NaN is present (e.g. a
+        # Long Stock row with no DTE), so 32 -> 32.0. Postgres rejects "32.0" for
+        # an INTEGER column, so send whole-number floats as ints. Safe for float
+        # columns too (Postgres stores int 32 as 32.0). Guard bool (subclass).
+        if isinstance(v, float) and not isinstance(v, bool) and v.is_integer():
+            return int(v)
         return v
     return [{k: fix(v) for k, v in rec.items()} for rec in records]
 
