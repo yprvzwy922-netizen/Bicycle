@@ -83,11 +83,42 @@ with right:
         c_inv  = cc1.selectbox("INVESTOR", investors, key="c_inv")
         c_amt  = cc2.number_input("AMOUNT ($)", min_value=0.0, step=1000.0, key="c_amt")
         c_date = cc3.date_input("DATE", datetime.date.today(), key="c_date")
-        units_now = c_amt / nav_per_unit if nav_per_unit > 0 else 0
-        st.caption(f"At NAV/unit ${nav_per_unit:,.2f} → **{units_now:,.2f} units** issued.")
+
+        # Units MUST be priced at the NAV/unit of the CONTRIBUTION DATE, not
+        # today's — otherwise a backdated contribution issues units at the wrong
+        # price and dilutes the other investors. Use that date's snapshot (or the
+        # latest one on/before it); fall back to live NAV only when there's no
+        # snapshot yet (e.g. contributing today before the job has run).
+        def _nav_on(d):
+            try:
+                snaps = db.load_fund_snapshots()
+                if snaps.empty or "snap_date" not in snaps:
+                    return None, None
+                s = snaps.copy()
+                s["nav_per_unit"] = pd.to_numeric(s["nav_per_unit"], errors="coerce")
+                s = s[(s["snap_date"].astype(str) <= d.isoformat()) & s["nav_per_unit"].notna()]
+                if s.empty:
+                    return None, None
+                s = s.sort_values("snap_date")
+                return float(s["nav_per_unit"].iloc[-1]), str(s["snap_date"].iloc[-1])
+            except Exception:
+                return None, None
+
+        nav_hist, nav_src = _nav_on(c_date)
+        use_nav = nav_hist if nav_hist and nav_hist > 0 else nav_per_unit
+        units_now = c_amt / use_nav if use_nav > 0 else 0
+        if nav_hist:
+            same = (nav_src == c_date.isoformat())
+            st.caption(f"At NAV/unit **${use_nav:,.4f}** (snapshot {nav_src}"
+                       f"{'' if same else ' — latest on/before ' + c_date.isoformat()})"
+                       f" → **{units_now:,.2f} units** issued.")
+        else:
+            st.caption(f"No snapshot on/before {c_date.isoformat()} — using CURRENT NAV/unit "
+                       f"${use_nav:,.4f} → **{units_now:,.2f} units** issued.")
         if st.button("ADD CONTRIBUTION", type="primary") and c_amt > 0:
-            db.add_contribution(c_inv, c_date.isoformat(), c_amt, units_now, nav_per_unit)
-            st.success(f"{c_inv} contributed ${c_amt:,.0f} → {units_now:,.2f} units.")
+            db.add_contribution(c_inv, c_date.isoformat(), c_amt, units_now, use_nav)
+            st.success(f"{c_inv} contributed ${c_amt:,.0f} → {units_now:,.2f} units "
+                       f"@ ${use_nav:,.4f}/unit.")
             st.rerun()
 
 st.markdown("---")
