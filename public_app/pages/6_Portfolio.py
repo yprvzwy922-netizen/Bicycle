@@ -689,11 +689,17 @@ checks.append(("STOCK INVENTORY", stock_pct <= MAX_STOCK_INV,
 shares_by_tkr = book[book["_IS_STOCK"]].groupby("TICKER")["CONTRACTS"].sum()
 naked = []
 for tkr, grp in book[book["_IS_CC"]].groupby("TICKER"):
-    need = float(grp["CONTRACTS"].sum()) * 100      # shares required
+    need = float(grp["CONTRACTS"].sum()) * 100      # shares required (100/contract)
     have = float(shares_by_tkr.get(tkr, 0))         # shares held
     if need > have + 1e-6:
-        naked.append(f"{tkr}: {int(grp['CONTRACTS'].sum())} call(s) need {int(need)} sh, have {int(have)} ({int(need-have)} uncovered)")
-checks.append(("CALLS BACKED BY STOCK", len(naked) == 0,
+        uncovered_cts = int(np.ceil((need - have) / 100))
+        naked.append(f"{tkr}: {uncovered_cts} of {int(grp['CONTRACTS'].sum())} call(s) NAKED "
+                     f"(need {int(need)} sh, have {int(have)})")
+if naked:
+    st.error("🚨 NAKED SHORT CALL — UNLIMITED UPSIDE RISK: " + "  |  ".join(naked) +
+             ".  A short call not backed by stock loses without limit if the name rallies. "
+             "Buy it back, or add the missing shares, before anything else.")
+checks.append(("NO NAKED SHORT CALLS", len(naked) == 0,
                "ALL COVERED" if not naked else " | ".join(naked),
                None, None))
 
