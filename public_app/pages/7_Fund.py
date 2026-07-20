@@ -316,12 +316,16 @@ if db.configured():
             bench["qqq"] = bench["snap_date"].map(closes)
             bench = bench.dropna().reset_index(drop=True)
             if len(bench) >= 2:
-                f0, q0 = float(bench["nav_per_unit"].iloc[0]), float(bench["qqq"].iloc[0])
-                fund_idx  = bench["nav_per_unit"] / f0 * 100
+                q0 = float(bench["qqq"].iloc[0])
+                # FUND line = the actual NAV/unit (already 100 at inception since
+                # SEED = $100), so it reads IDENTICALLY to the NAV/UNIT history
+                # chart above. QQQ is indexed to 100 at the first snapshot so both
+                # sit on a comparable scale.
+                fund_idx  = bench["nav_per_unit"] / SEED_NAV_PER_UNIT * 100
                 qqq_idx   = bench["qqq"] / q0 * 100
                 basket_2x = 100 * (1 + 2 * (bench["qqq"] / q0 - 1))   # beta≈2 basket proxy
 
-                st.markdown("### FUND vs NASDAQ — INDEXED TO 100")
+                st.markdown("### FUND vs NASDAQ — INDEXED TO 100 (100 = inception)")
                 fig3 = go.Figure()
                 fig3.add_scatter(x=bench["snap_date"], y=basket_2x, name="2× QQQ (≈ YOUR BASKET)",
                                  mode="lines", line=dict(color="#666666", width=1, dash="dot"))
@@ -338,9 +342,12 @@ if db.configured():
                     xaxis=dict(gridcolor="#1e1e1e", type="category"),
                     yaxis=dict(gridcolor="#1e1e1e"))
                 st.plotly_chart(fig3, use_container_width=True)
-                d_f, d_q = fund_idx.iloc[-1] - 100, qqq_idx.iloc[-1] - 100
-                st.caption(f"Since first snapshot: FUND {d_f:+.1f}% vs QQQ {d_q:+.1f}% "
-                           f"(implied ≈β2 basket {2*d_q:+.1f}%). Blue above grey in a selloff = the "
+                # Fair window comparison: both measured from the first snapshot.
+                d_f = (fund_idx.iloc[-1] / fund_idx.iloc[0] - 1) * 100
+                d_q = qqq_idx.iloc[-1] - 100
+                st.caption(f"FUND now {fund_idx.iloc[-1]:.2f} (= NAV/unit above). Over the tracked "
+                           f"window: FUND {d_f:+.1f}% vs QQQ {d_q:+.1f}% (implied ≈β2 basket "
+                           f"{2*d_q:+.1f}%). Blue above grey in a selloff = the "
                            f"premium cushion absorbing beta — the strategy doing its job. Expect blue "
                            f"to LAG in strong rallies (capped upside): judge over full cycles.")
     else:
