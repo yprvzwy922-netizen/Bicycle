@@ -18,7 +18,7 @@ TRADE_COLUMNS = [
     "SHORT STRIKE","LONG STRIKE","EXPIRY","DTE OPEN",
     "CONTRACTS","PREMIUM / CREDIT","CASH SECURED","MAX LOSS",
     "STATUS","DATE CLOSED","CLOSE PRICE","REALIZED PNL","SIGNAL",
-    "RECOMMENDED BY","CONSENSUS","MANUAL MARK","NOTES"
+    "RECOMMENDED BY","CONSENSUS","MANUAL MARK","NET CREDIT BASIS","NOTES"
 ]
 
 _COL2DB = {
@@ -29,7 +29,7 @@ _COL2DB = {
     "DATE CLOSED":"date_closed", "CLOSE PRICE":"close_price",
     "REALIZED PNL":"realized_pnl", "SIGNAL":"signal",
     "RECOMMENDED BY":"recommended_by", "CONSENSUS":"consensus",
-    "MANUAL MARK":"manual_mark", "NOTES":"notes",
+    "MANUAL MARK":"manual_mark", "NET CREDIT BASIS":"net_credit_basis", "NOTES":"notes",
 }
 _DB2COL = {v: k for k, v in _COL2DB.items()}
 
@@ -96,7 +96,7 @@ def load_trades() -> pd.DataFrame:
 
 # Columns the app can live without if the DB migration hasn't been run yet —
 # never let a missing optional column block trade entry.
-_OPTIONAL_DB_COLS = ["manual_mark", "recommended_by", "consensus", "signal"]
+_OPTIONAL_DB_COLS = ["manual_mark", "net_credit_basis", "recommended_by", "consensus", "signal"]
 
 def upsert_trades(df: pd.DataFrame):
     """Upsert the rows in df ONLY. Never deletes — so a concurrent user (or a

@@ -207,20 +207,30 @@ for _i, (_, t) in enumerate(open_trades.iterrows()):
         tenor     = "3M" if dte_open > 60 else "1M"
         manage_at = 45 if tenor == "3M" else 21
 
-        if is_short and prem > 0 and not np.isnan(curr_mid):
-            pct_max_profit = (prem - curr_mid) / prem
+        # For a ROLLED position, profit-take is measured against the CAMPAIGN's
+        # cumulative net credit (NET CREDIT BASIS), not the new leg's premium —
+        # otherwise "50%" fires at campaign breakeven (see NUAI). Falls back to
+        # the leg premium when no basis is set.
+        ncb = float(t["NET CREDIT BASIS"]) if ("NET CREDIT BASIS" in t and
+              pd.notna(t.get("NET CREDIT BASIS")) and t.get("NET CREDIT BASIS")) else None
+        profit_basis = ncb if (ncb and ncb > 0) else prem
+        rolled = ncb is not None and ncb > 0
+
+        if is_short and profit_basis > 0 and not np.isnan(curr_mid):
+            pct_max_profit = (profit_basis - curr_mid) / profit_basis
         if is_short and short_strike > 0 and dte_rem and dte_rem > 0 and not np.isnan(curr_mid):
             yield_left = (curr_mid / short_strike) * (365.0 / dte_rem)
 
+        _tag = " · CAMPAIGN" if rolled else ""
         if not np.isnan(pct_max_profit) and pct_max_profit >= 0.90:
-            action = "CLOSE (90%+)"
+            action = "CLOSE (90%+)" + _tag
         elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.50 and \
              not np.isnan(yield_left) and yield_left < 0.15:
-            action = "CLOSE (YIELD LEFT < 15%)"
+            action = "CLOSE (YIELD LEFT < 15%)" + _tag
         elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.75:
-            action = "TAKE 75% TIER"
+            action = "TAKE 75% TIER" + _tag
         elif not np.isnan(pct_max_profit) and pct_max_profit >= 0.50:
-            action = "TAKE 50% TIER"
+            action = "TAKE 50% TIER" + _tag
         elif dte_rem is not None and dte_rem <= manage_at:
             action = f"MANAGE ({tenor} @ {manage_at} DTE)"
 

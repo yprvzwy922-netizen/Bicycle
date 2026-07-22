@@ -32,6 +32,10 @@ alter table trades add column if not exists recommended_by text;
 alter table trades add column if not exists consensus boolean;
 -- Manual mark override (price per share typed from the broker for thin names):
 alter table trades add column if not exists manual_mark double precision;
+-- Net credit basis: for rolled positions, the CAMPAIGN's cumulative net credit
+-- per share (e.g. 1.25) so profit-take % is measured against it, not the new
+-- leg's premium. Blank on normal trades.
+alter table trades add column if not exists net_credit_basis double precision;
 
 create table if not exists watchlist (
   ticker      text primary key,
