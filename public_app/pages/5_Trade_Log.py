@@ -506,6 +506,36 @@ if not trades.empty:
             by_strat.style.format({"TOTAL PNL":"${:,.2f}","AVG PNL":"${:,.2f}"}),
             use_container_width=True, hide_index=True)
 
+        # ── Per-trade return on capital (closed trades only) ──────────────────
+        rt = closed.copy()
+        cap = pd.to_numeric(rt["CASH SECURED"], errors="coerce")
+        cap = cap.fillna(pd.to_numeric(rt["MAX LOSS"], errors="coerce"))   # spreads: use max loss
+        rt["CAPITAL"] = cap
+        opened = pd.to_datetime(rt["DATE OPENED"], errors="coerce")
+        closedd = pd.to_datetime(rt["DATE CLOSED"], errors="coerce")
+        rt["DAYS"] = (closedd - opened).dt.days.clip(lower=1)
+        rt["ROC"]  = rt["REALIZED PNL"] / rt["CAPITAL"]
+        rt["ANN. RETURN"] = rt["ROC"] * 365.0 / rt["DAYS"]
+        rcols = ["TICKER","STRATEGY","DATE OPENED","DATE CLOSED","DAYS",
+                 "CAPITAL","REALIZED PNL","ROC","ANN. RETURN"]
+        show = rt[rt["CAPITAL"].notna() & closedd.notna()][rcols].rename(
+            columns={"DATE OPENED":"OPENED","DATE CLOSED":"CLOSED"})
+        if not show.empty:
+            st.markdown("### CLOSED TRADES — RETURN ON CAPITAL")
+            def _cr(v):
+                try: return "color:#00e676;font-weight:600" if float(v)>0 else ("color:#ff4444;font-weight:600" if float(v)<0 else "")
+                except Exception: return ""
+            st.dataframe(
+                show.sort_values("CLOSED", ascending=False).style
+                    .map(_cr, subset=["REALIZED PNL","ROC","ANN. RETURN"])
+                    .format({"CAPITAL":"${:,.0f}","REALIZED PNL":"${:,.2f}","DAYS":"{:.0f}",
+                             "ROC":"{:.1%}","ANN. RETURN":"{:.0%}"}, na_rep="—"),
+                use_container_width=True, hide_index=True)
+            st.caption("ANN. RETURN = (realized ÷ capital at risk) × 365 ÷ days held. "
+                       "Short holds annualize to big figures — a fast 50% close is capital-efficient, "
+                       "but the rate isn't fully repeatable. Assigned/rolled rows show the PREMIUM leg "
+                       "only; the rest of that P&L lives in the resulting stock / new leg.")
+
     # ── Accountability — who recommended what, and how it did ──────────────────
     if "RECOMMENDED BY" in trades.columns and trades["RECOMMENDED BY"].notna().any():
         st.markdown("### ACCOUNTABILITY — TRADES BY RECOMMENDER")
