@@ -541,10 +541,25 @@ if not trades.empty:
                    "only — a fast 50% close is capital-efficient, but short holds over-annualize, "
                    "so read those as 'efficient', not a yearly rate.")
             if excluded:
-                cap += (f"  ⚠ {excluded} ASSIGNED/ROLLED trade(s) are EXCLUDED — their P&L isn't final "
-                        f"(it continues in the assigned stock or the new leg), so any 'return' would be "
-                        f"misleading. The assigned ones especially look like wins but were losses.")
+                cap += f"  {excluded} assigned/rolled trade(s) are shown separately below."
             st.caption(cap)
+
+        # ── Assigned / rolled — shown SEPARATELY (P&L not final) ──────────────
+        pend = rt[closedd.notna() & ~rt["STATUS"].isin(CLEAN)].copy()
+        if not pend.empty:
+            pend["CONTINUES IN"] = pend["STATUS"].map(
+                lambda s: "→ assigned stock" if "ASSIGNED" in str(s) else "→ new (rolled) leg")
+            pv = pend[["TICKER","STRATEGY","STATUS","DATE CLOSED","REALIZED PNL","CONTINUES IN"]].rename(
+                columns={"STATUS":"OUTCOME","DATE CLOSED":"CLOSED","REALIZED PNL":"BOOKED (LEG ONLY)"})
+            with st.expander(f"ASSIGNED / ROLLED — {len(pv)} trade(s), P&L NOT FINAL (no return shown)"):
+                st.dataframe(
+                    pv.sort_values("CLOSED", ascending=False).style
+                      .format({"BOOKED (LEG ONLY)":"${:,.2f}"}, na_rep="—"),
+                    use_container_width=True, hide_index=True)
+                st.caption("Deliberately no return here — these aren't finished. The amount is ONE leg "
+                           "only: an assigned put keeps its premium but the real P&L is now in the stock; "
+                           "a roll books this leg's loss but the campaign continues. The full return "
+                           "becomes real when the stock is sold / the rolled position finally closes.")
 
     # ── Accountability — who recommended what, and how it did ──────────────────
     if "RECOMMENDED BY" in trades.columns and trades["RECOMMENDED BY"].notna().any():
