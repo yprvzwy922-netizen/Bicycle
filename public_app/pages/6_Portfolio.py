@@ -12,7 +12,7 @@ import streamlit as st
 import bbg_style
 import db
 from shared import (get_watchlist, fetch_spot, bs_put_delta, bs_call_delta,
-                    bs_price, fetch_option_live)
+                    bs_price, fetch_option_live, fetch_earnings)
 import datetime
 
 bbg_style.inject()
@@ -234,6 +234,17 @@ for _i, (_, t) in enumerate(open_trades.iterrows()):
         elif dte_rem is not None and dte_rem <= manage_at:
             action = f"MANAGE ({tenor} @ {manage_at} DTE)"
 
+        # Earnings reminder — next report within ~10 days AND before this option
+        # expires = gap risk on a short put. Prepend so it's never hidden by a
+        # profit-take tag; keep both if there's already an action.
+        try:
+            ed = fetch_earnings(tkr)
+        except Exception:
+            ed = None
+        if ed is not None and 0 <= ed <= 10 and (dte_rem is None or ed <= dte_rem):
+            ern = f"⚠ ERN {ed}d"
+            action = f"{ern} · {action}" if action else ern
+
     # ── Cash at risk / max loss (strategy-aware) ───────────────────────────────
     # Use the Trade Log's stored values when present, otherwise derive correctly
     # per strategy — NEVER fall back to strike*100 for spreads/covered calls,
@@ -418,6 +429,7 @@ def color_pct_profit(v):
 
 def color_action(v):
     s = str(v)
+    if "ERN" in s:             return "color:#ff4444;font-weight:700"   # earnings gap risk — loudest
     if s.startswith("CLOSE"):  return "color:#00e676;font-weight:700"
     if s.startswith("TAKE"):   return "color:#00c8ff;font-weight:600"
     if s.startswith("MANAGE"): return "color:#ff9900;font-weight:600"
