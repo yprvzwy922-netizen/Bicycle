@@ -254,15 +254,19 @@ def fetch_spot(tkr):
         return float("nan")
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _hist_cached(tkr):
-    h = yf.Ticker(tkr).history(period="1y")
+def _hist_cached(tkr, repair=False):
+    # repair=True fixes yfinance's known bug where the MOST RECENT daily bar can
+    # come back NaN even though Yahoo's quote endpoint has it (e.g. QQQ 07-24).
+    # Costs ~0.5s extra per fetch, so it's opt-in — used for the benchmark line,
+    # not the 80-name screeners.
+    h = yf.Ticker(tkr).history(period="1y", repair=repair)
     if h is None or h.empty:
         raise RuntimeError("no history")     # failures are never cached
     return h
 
-def fetch_hist(tkr):
+def fetch_hist(tkr, repair=False):
     try:
-        return _hist_cached(tkr)
+        return _hist_cached(tkr, repair)
     except Exception:
         return pd.DataFrame()
 

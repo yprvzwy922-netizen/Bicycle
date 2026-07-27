@@ -308,7 +308,7 @@ if db.configured():
         # ── Fund vs Nasdaq benchmark (indexed) ───────────────────────────────
         # QQQ closes are mapped onto the existing snapshot dates at render
         # time (no schema change; works for all past points).
-        qqq_hist = fetch_hist("QQQ")
+        qqq_hist = fetch_hist("QQQ", repair=True)   # repair fills yfinance's NaN latest bar
         if not qqq_hist.empty and len(fs) >= 2:
             closes = {d.isoformat(): float(c)
                       for d, c in zip(qqq_hist.index.date, qqq_hist["Close"])}
