@@ -313,10 +313,15 @@ if db.configured():
             closes = {d.isoformat(): float(c)
                       for d, c in zip(qqq_hist.index.date, qqq_hist["Close"])}
             bench = fs[["snap_date", "nav_per_unit"]].copy()
-            bench["qqq"] = bench["snap_date"].map(closes)
-            bench = bench.dropna().reset_index(drop=True)
-            if len(bench) >= 2:
-                q0 = float(bench["qqq"].iloc[0])
+            bench["nav_per_unit"] = pd.to_numeric(bench["nav_per_unit"], errors="coerce")
+            bench["qqq"] = bench["snap_date"].astype(str).map(closes)
+            # Keep EVERY fund point; only require a NAV/unit. A missing QQQ close
+            # (e.g. today's bar hasn't published yet) leaves a gap in the QQQ line
+            # instead of dropping the fund's latest point — so this chart never
+            # lags the NAV/unit history above.
+            bench = bench.dropna(subset=["nav_per_unit"]).reset_index(drop=True)
+            if len(bench) >= 2 and bench["qqq"].notna().sum() >= 1:
+                q0 = float(bench["qqq"].dropna().iloc[0])
                 # FUND line = the actual NAV/unit (already 100 at inception since
                 # SEED = $100), so it reads IDENTICALLY to the NAV/UNIT history
                 # chart above. QQQ is indexed to 100 at the first snapshot so both
@@ -343,9 +348,13 @@ if db.configured():
                     yaxis=dict(gridcolor="#1e1e1e"))
                 st.plotly_chart(fig3, use_container_width=True)
                 # Fair window comparison: both measured from the first snapshot.
+                # Use the last AVAILABLE QQQ point (today's bar may not have
+                # published yet, in which case QQQ trails the fund by one day).
                 d_f = (fund_idx.iloc[-1] / fund_idx.iloc[0] - 1) * 100
-                d_q = qqq_idx.iloc[-1] - 100
-                st.caption(f"FUND now {fund_idx.iloc[-1]:.2f} (= NAV/unit above). Over the tracked "
+                q_last = qqq_idx.dropna()
+                d_q = (q_last.iloc[-1] - 100) if len(q_last) else float("nan")
+                q_note = "" if bench["qqq"].iloc[-1] == bench["qqq"].iloc[-1] else "  (QQQ bar for the latest day not published yet)"
+                st.caption(f"FUND now {fund_idx.iloc[-1]:.2f} (= NAV/unit above).{q_note} Over the tracked "
                            f"window: FUND {d_f:+.1f}% vs QQQ {d_q:+.1f}% (implied ≈β2 basket "
                            f"{2*d_q:+.1f}%). Blue above grey in a selloff = the "
                            f"premium cushion absorbing beta — the strategy doing its job. Expect blue "
