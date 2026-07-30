@@ -348,7 +348,6 @@ else:
                    if CAP_MODE.startswith("Auto") else ""))
 
 # ── Portfolio KPIs (single row, cash included) ────────────────────────────────
-total_deployed = book["CASH AT RISK"].sum()
 total_max_loss = book["MAX LOSS"].sum()
 total_ddelta   = pd.to_numeric(book["$ DELTA"], errors="coerce").sum()   # used by risk checks
 short_opt      = book[(~book["_IS_STOCK"]) & (book["_IS_SHORT"])]
@@ -386,9 +385,11 @@ k1.metric("TOTAL CAPITAL",     f"${TOTAL_CAPITAL:,.0f}",
           help="The base all risk caps are measured against. " + cap_note)
 k2.metric("TOTAL CASH (T-BILLS)", f"${acct_cash:,.0f}",
           help="Fund value − stock held + premium cash collected. The actual cash in the account.")
-k3.metric("CAPITAL DEPLOYED",  f"${total_deployed:,.0f}", f"{pct_deployed:.1%}",
-          help="Collateral securing open puts = the max capital at risk (cash-secured = strike×100; "
-               "spreads = max loss; covered calls = $0). Same figure as total max loss.")
+k3.metric("CAPITAL DEPLOYED",  f"${reserved_cash:,.0f}", f"{pct_deployed:.1%}",
+          help="Cash-secured collateral on open options (cash-secured put = strike×100; spreads = "
+               "max loss; covered calls = $0). EXCLUDES assigned stock — that's stock-secured, not "
+               "cash, and already out of TOTAL CASH (see the HELD STOCK panel). So the tiles reconcile: "
+               "TOTAL CASH − CAPITAL DEPLOYED = AVAILABLE CASH.")
 k4.metric("AVAILABLE CASH",    f"${available_cash:,.0f}",
           help="Dry powder free to deploy into new cash-secured puts (total cash − collateral reserved).")
 k5.metric("PREMIUM RECEIVED",  f"${total_premium:,.0f}",
