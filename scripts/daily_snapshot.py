@@ -135,8 +135,10 @@ def should_skip(table):
 
 # ── Per-ticker snapshots ──────────────────────────────────────────────────────
 wl = rest("GET", "watchlist", params={"select": "ticker"}) or []
-tickers = sorted({w["ticker"] for w in wl})
-print(f"watchlist: {len(tickers)} tickers")
+# +QQQ: the fund-vs-Nasdaq chart reads its benchmark from the DB (Yahoo rate-
+# limits the deployed app), so we store QQQ's close here like any other ticker.
+tickers = sorted({w["ticker"] for w in wl} | {"QQQ"})
+print(f"watchlist: {len(tickers)} tickers (incl. QQQ benchmark)")
 
 ticker_rows = []
 for tkr in tickers:
@@ -160,6 +162,24 @@ if ticker_rows:
     rest("POST", "snapshots", json=ticker_rows,
          prefer="resolution=merge-duplicates,return=minimal")
     print(f"snapshots written: {len(ticker_rows)}")
+
+# ── One-time QQQ history backfill ─────────────────────────────────────────────
+# The daily loop above stores TODAY's QQQ close; this fills PAST trading days so
+# the fund-vs-Nasdaq chart shows full history immediately (not just from now on).
+# Only missing dates are written; merge-duplicates keeps re-runs idempotent.
+try:
+    have = {r["snap_date"] for r in (rest("GET", "snapshots",
+            params={"select": "snap_date", "ticker": "eq.QQQ"}) or [])}
+    qh = yf.Ticker("QQQ").history(period="1y")
+    backfill = [{"snap_date": d.date().isoformat(), "ticker": "QQQ", "spot": round(float(c), 4)}
+                for d, c in zip(qh.index, qh["Close"])
+                if c == c and d.date().isoformat() not in have]
+    if backfill:
+        rest("POST", "snapshots", json=backfill,
+             prefer="resolution=merge-duplicates,return=minimal")
+        print(f"QQQ history backfilled: {len(backfill)} day(s)")
+except Exception as e:
+    print(f"QQQ backfill skipped: {e}")
 
 # ── Portfolio snapshot ────────────────────────────────────────────────────────
 trades = rest("GET", "trades", params={"select": "*"}) or []

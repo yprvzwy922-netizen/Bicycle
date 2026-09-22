@@ -302,3 +302,17 @@ def load_fund_snapshots() -> pd.DataFrame:
         return pd.DataFrame(rows)
     except Exception:
         return pd.DataFrame()
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_ticker_closes(ticker: str) -> pd.DataFrame:
+    """Daily closes for ONE ticker from the snapshots table (snap_date, spot).
+    Lets the fund-vs-benchmark chart source QQQ from OUR DB instead of a live
+    Yahoo call at render — reliable on Streamlit Cloud, whose shared IPs Yahoo
+    rate-limits. Empty when the daily job hasn't stored this ticker yet."""
+    try:
+        rows = _rest("GET", "snapshots",
+                     params={"select": "snap_date,spot", "ticker": f"eq.{ticker.upper()}",
+                             "order": "snap_date"}) or []
+        return pd.DataFrame(rows)
+    except Exception:
+        return pd.DataFrame()

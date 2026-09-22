@@ -308,10 +308,19 @@ if db.configured():
         # ── Fund vs Nasdaq benchmark (indexed) ───────────────────────────────
         # QQQ closes are mapped onto the existing snapshot dates at render
         # time (no schema change; works for all past points).
-        qqq_hist = fetch_hist("QQQ", repair=True)   # repair fills yfinance's NaN latest bar
-        if not qqq_hist.empty and len(fs) >= 2:
-            closes = {d.isoformat(): float(c)
-                      for d, c in zip(qqq_hist.index.date, qqq_hist["Close"])}
+        # QQQ closes come from OUR DB (snapshots table, written by the daily job).
+        # Yahoo rate-limits the deployed app, so a live fetch at render is flaky —
+        # fall back to a live pull only if the DB has none yet (e.g. local dev
+        # before the job has run).
+        qdb = db.load_ticker_closes("QQQ")
+        closes = ({str(d): float(s) for d, s in zip(qdb["snap_date"], qdb["spot"])
+                   if pd.notna(s)} if not qdb.empty else {})
+        if not closes:
+            qh = fetch_hist("QQQ", repair=True)     # repair fills yfinance's NaN latest bar
+            if not qh.empty:
+                closes = {d.isoformat(): float(c)
+                          for d, c in zip(qh.index.date, qh["Close"])}
+        if closes and len(fs) >= 2:
             bench = fs[["snap_date", "nav_per_unit"]].copy()
             bench["nav_per_unit"] = pd.to_numeric(bench["nav_per_unit"], errors="coerce")
             bench["qqq"] = bench["snap_date"].astype(str).map(closes)
