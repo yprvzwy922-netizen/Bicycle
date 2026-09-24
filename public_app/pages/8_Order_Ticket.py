@@ -101,12 +101,27 @@ total_credit  = sum(it["contracts"] * it["price"] * 100 for it in singles
                     if str(it["action"]).startswith("sell"))
 total_credit += sum(r["contracts"] * r["net_credit"] * 100 for r in rolls)
 
-k1, k2, k3, k4 = st.columns(4)
+# Cash the ticket ties up to OPEN it: cash-secured put collateral (strike x100)
+# for sell-to-open puts, plus the debit paid on any buy-to-open long. Sell-to-open
+# calls are stock-secured ($0 cash), and closing legs / rolls don't add new cash.
+def _cash_used(it):
+    act = str(it["action"])
+    if act.startswith("sell to open") and str(it["type"]).upper().startswith("P"):
+        return it["strike"] * 100 * it["contracts"]      # cash-secured put collateral
+    if act.startswith("buy to open"):
+        return it["price"] * 100 * it["contracts"]        # long option debit
+    return 0.0
+cash_used = sum(_cash_used(it) for it in singles)
+
+k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("LINES", len(singles))
 k2.metric("ROLLS", len(rolls))
 k3.metric("TOTAL CONTRACTS", total_contracts)
 k4.metric("EST. CREDIT", f"${total_credit:,.0f}",
           help="Sell-side single legs + roll net credits")
+k5.metric("CASH USED", f"${cash_used:,.0f}",
+          help="Cash tied up to open the ticket: cash-secured put collateral "
+               "(strike x 100 x contracts) + any long-option debit. Covered calls = $0.")
 
 msg = ticket.format_message(items, account)
 st.code(msg, language=None)
