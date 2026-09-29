@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import bbg_style
 import db
+import ticket
 from shared import (get_watchlist, fetch_spot, bs_put_delta, bs_call_delta,
                     bs_price, fetch_option_live, fetch_earnings)
 import datetime
@@ -463,13 +464,59 @@ styled_book = (disp_book.style
     .map(color_action,     subset=["ACTION"])
     .format(fmt, na_rep="—"))
 
-st.dataframe(styled_book, use_container_width=True, hide_index=True,
+pos_sel = st.dataframe(styled_book, use_container_width=True, hide_index=True,
+             on_select="rerun", selection_mode="multi-row", key="pos_open_table",
              column_config={"TICKER": st.column_config.Column(pinned=True)})
+st.caption("TIP: tick rows above, then use CLOSE SELECTED → TICKET below to build the closing order.")
 st.caption("DELTA: short put = +d | short call = -d | long stock = +1 | covered call = -d when shares are a separate "
            "LONG STOCK row, else 1-d (combined)  |  IV from live option chain, fallback 35%  |  "
            "COVERED CALL UNREAL PNL = option leg only")
 st.caption("PROFIT-TAKE PROCEDURE (MANUAL §5.1): GTC BUY-TO-CLOSE AT 50% ON ENTRY → CLOSE 1/2 AT 50%, 1/4 AT 75%, REST BY 90% OR MANAGE-BY DATE (1M @ 21 DTE, 3M @ 45 DTE). "
            "YIELD LEFT = ANNUALIZED YIELD OF PREMIUM STILL ON THE TABLE — IF < 15% AFTER THE 50% TIER, CLOSE AND REDEPLOY.")
+
+# ── Close selected positions → order ticket ──────────────────────────────────
+# Row selection above -> closing orders on the ticket: BUY-TO-CLOSE for shorts,
+# SELL-TO-CLOSE for longs, priced at the live mark. Stock closes via the Trade
+# Log SOLD action; multi-leg spreads need per-leg pricing — both are flagged and
+# skipped rather than mis-ticketed.
+try:
+    _rows = list(pos_sel.selection.rows)
+except Exception:
+    try:
+        _rows = list(pos_sel["selection"]["rows"])
+    except Exception:
+        _rows = []
+if _rows:
+    picked = book.iloc[_rows]
+    st.markdown("#### CLOSE SELECTED → TICKET")
+    cbt, cbcap = st.columns([3, 7])
+    if cbt.button(f"＋ ADD {len(picked)} TO TICKET (CLOSE)", type="primary",
+                  use_container_width=True):
+        added, skipped = 0, []
+        for _, r in picked.iterrows():
+            tkr = str(r["TICKER"])
+            if r["_IS_STOCK"]:
+                skipped.append(f"{tkr} stock (use Trade Log → SOLD)"); continue
+            if r["_IS_SPREAD"]:
+                skipped.append(f"{tkr} spread (close manually)"); continue
+            strike = r["SHORT STRIKE"]
+            if strike is None or (isinstance(strike, float) and np.isnan(strike)):
+                skipped.append(f"{tkr} (no strike)"); continue
+            action   = "buy to close" if r["_IS_SHORT"] else "sell to close"
+            opt_type = "put" if r["_IS_PUT"] else "call"
+            cm = r["CURRENT MID"]
+            price = float(cm) if (cm is not None and not (isinstance(cm, float) and np.isnan(cm))) else 0.0
+            ticket.add_to_ticket(action, tkr, str(r["EXPIRY"]), opt_type,
+                                 float(strike), round(price, 2), int(r["CONTRACTS"]))
+            added += 1
+        msg = f"Added {added} closing order(s) to the ticket."
+        if skipped:
+            msg += "  Skipped — " + "; ".join(skipped)
+        (st.success if added else st.warning)(msg)
+    cbcap.caption("BUY-TO-CLOSE (shorts) / SELL-TO-CLOSE (longs) at the current mark. "
+                  "Review & send on the ORDER TICKET page.")
+    if st.button("→ OPEN ORDER TICKET"):
+        st.switch_page("pages/8_Order_Ticket.py")
 
 # ── Held stock — covered-call capacity (consolidated per ticker) ─────────────
 # Multiple Long Stock lots per name are possible (each assignment adds a row),
