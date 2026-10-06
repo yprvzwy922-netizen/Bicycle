@@ -111,6 +111,11 @@ DEFAULT_WATCHLIST = [
     {"ticker": "HOOD",  "company": "Robinhood",               "sector": "Financials",           "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
     {"ticker": "SOFI",  "company": "SoFi Technologies",       "sector": "Financials",           "bucket": "Growth",      "conviction": 2, "delta_band": "Income"},
     {"ticker": "XOM",   "company": "ExxonMobil",              "sector": "Energy & Power",       "bucket": "Core",        "conviction": 4, "delta_band": "Income"},
+    {"ticker": "ARM",   "company": "Arm Holdings",            "sector": "Semiconductors",       "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "INTC",  "company": "Intel",                   "sector": "Semiconductors",       "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "TER",   "company": "Teradyne",                "sector": "Semiconductors",       "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    {"ticker": "DVA",   "company": "DaVita",                  "sector": "Healthcare",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "PSIX",  "company": "Power Solutions Intl",    "sector": "Industrials",          "bucket": "Speculative", "conviction": 3, "delta_band": "Income"},
 ]
 
 SECTORS = sorted(set(w["sector"] for w in DEFAULT_WATCHLIST))
