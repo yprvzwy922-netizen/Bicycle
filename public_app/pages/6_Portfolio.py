@@ -599,20 +599,26 @@ st.markdown("---")
 # ── Stress test — basket shock, both directions (manual §9 on the live book) ──
 st.markdown("### STRESS TEST — BASKET SHOCK")
 
-sm1, sm2 = st.columns([3, 7])
-stress_mode = sm1.radio("VALUATION MODE", ["HOLD TO EXPIRY", "INSTANT SHOCK"],
-                        horizontal=True,
-                        help="HOLD TO EXPIRY: each option valued at intrinsic on ITS OWN expiry "
-                             "(P&L vs entry premium — matches the payoff diagrams). "
-                             "INSTANT SHOCK: all positions repriced TODAY with Black-Scholes at "
-                             "their own remaining DTE and live IV — one common horizon, which is "
-                             "how a book with multiple expiries is stressed consistently.")
+sm1, sm2 = st.columns([4, 6])
+with sm1:
+    stress_mode = st.segmented_control(
+        "VALUATION MODE", ["INSTANT SHOCK", "HOLD TO EXPIRY"],
+        default="INSTANT SHOCK", selection_mode="single",
+        help="INSTANT SHOCK: every position repriced with Black-Scholes at live IV, on its "
+             "remaining DTE minus the TIME HORIZON — one common clock (expired legs settle to "
+             "intrinsic). HOLD TO EXPIRY: each option at intrinsic on ITS OWN expiry (final P&L "
+             "vs entry — matches the payoff diagrams; the time horizon is ignored).")
+    stress_mode = stress_mode or "INSTANT SHOCK"
+with sm2:
+    weeks_fwd = st.slider("TIME HORIZON — WEEKS FORWARD", 0, 12, 0,
+        disabled=(stress_mode == "HOLD TO EXPIRY"),
+        help="Roll the clock forward: short premium (puts & covered calls) is harvested as those "
+             "legs decay and expire, while any long options bleed theta. Applies to INSTANT SHOCK.")
 
-st.caption("Stock legs included: Long Stock P&L vs entry price; covered calls assume you own 100 sh/contract "
-           "(stock leg measured from current spot — entry basis unknown). IV held constant in INSTANT mode "
-           "(a real crash lifts IV, making short-option marks temporarily worse). T-bill interest not modeled.")
+st.caption("Stock legs: Long Stock P&L vs entry; covered calls assume 100 sh/contract (stock leg from current "
+           "spot). IV held constant (a real crash lifts IV, worsening short-option marks). T-bill interest not modeled.")
 
-def book_pnl_at(shock: float, mode: str) -> float:
+def book_pnl_at(shock: float, mode: str, weeks: int = 0) -> float:
     total = 0.0
     for _, r in book.iterrows():
         spot_r = r["SPOT"]
@@ -639,12 +645,13 @@ def book_pnl_at(shock: float, mode: str) -> float:
 
         kind = "put" if r["_IS_PUT"] else "call"
         if mode == "INSTANT SHOCK":
-            v = bs_price(s, k, r["_IV"], r["_DTE_REM"], kind=kind)
+            dte_eff = max(0.0, (r["_DTE_REM"] or 0) - weeks * 7)   # roll the clock forward
+            v = bs_price(s, k, r["_IV"], dte_eff, kind=kind)
             if r["_IS_SPREAD"] and kl:
-                v -= bs_price(s, kl, r["_IV"], r["_DTE_REM"], kind=kind)
-            # Anchor to the live mark: shift the BS curve so 0% shock reprices
-            # to the actual current mid (removes BS-vs-market model gap). Single
-            # options only — spreads don't store a long-leg mark.
+                v -= bs_price(s, kl, r["_IV"], dte_eff, kind=kind)
+            # Anchor the today/0% point to the live mark (removes the BS-vs-market
+            # model gap). Uses CURRENT DTE, so rolling the horizon forward shows
+            # real theta decay rather than being cancelled out. Single options only.
             cm = r["CURRENT MID"]
             if not r["_IS_SPREAD"] and cm is not None and not (isinstance(cm, float) and np.isnan(cm)):
                 v += cm - bs_price(spot_r, k, r["_IV"], r["_DTE_REM"], kind=kind)
@@ -657,13 +664,15 @@ def book_pnl_at(shock: float, mode: str) -> float:
         total += pnl * 100 * ctrs
     return total
 
+_wk = weeks_fwd if stress_mode == "INSTANT SHOCK" else 0
 shocks     = np.arange(-0.60, 0.605, 0.01)
-curve      = [book_pnl_at(s, stress_mode) for s in shocks]
+curve      = [book_pnl_at(s, stress_mode, _wk) for s in shocks]
 sel_shock  = st.slider("BASKET SHOCK %", -60, 60, 0, 1) / 100
-pnl_at_sel = book_pnl_at(sel_shock, stress_mode)
+pnl_at_sel = book_pnl_at(sel_shock, stress_mode, _wk)
 
+_hz = f"  ·  +{_wk}W" if _wk else ""
 s1, s2, s3 = st.columns(3)
-s1.metric(f"P&L AT {sel_shock:+.0%}", f"${pnl_at_sel:,.0f}")
+s1.metric(f"P&L AT {sel_shock:+.0%}{_hz}", f"${pnl_at_sel:,.0f}")
 s2.metric("VS TOTAL CAPITAL", f"{pnl_at_sel/TOTAL_CAPITAL:+.1%}")
 dd_ok = pnl_at_sel/TOTAL_CAPITAL > -0.30
 s3.metric("DRAWDOWN TOLERANCE (20-30%)", "WITHIN" if dd_ok else "BREACHED")
@@ -682,7 +691,7 @@ fig_st.update_layout(
     font=dict(family="IBM Plex Mono", color="#cccccc", size=11),
     margin=dict(l=40, r=20, t=20, b=40), height=380, showlegend=False,
     xaxis=dict(title="BASKET MOVE %", gridcolor="#1e1e1e", ticksuffix="%"),
-    yaxis=dict(title=f"P&L ({stress_mode})", gridcolor="#1e1e1e", tickprefix="$"))
+    yaxis=dict(title=f"P&L ({stress_mode}{', +'+str(_wk)+'w' if _wk else ''})", gridcolor="#1e1e1e", tickprefix="$"))
 st.plotly_chart(fig_st, use_container_width=True)
 
 st.markdown("---")
