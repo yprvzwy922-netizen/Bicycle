@@ -101,7 +101,7 @@ nt_contracts= cc4.number_input("SHARES" if is_stock else "CONTRACTS",
 
 sc1, sc2, sc3 = st.columns(3)
 nt_short_strike = sc1.number_input(
-    "SHORT STRIKE (sell leg)" + (" — N/A FOR STOCK" if is_stock else ""),
+    ("SHORT STRIKE (sell leg)" if is_spread else "STRIKE") + (" — N/A FOR STOCK" if is_stock else ""),
     min_value=0.0, step=0.50, key="nt_short_strike", disabled=is_stock)
 nt_long_strike  = sc2.number_input(
     "LONG STRIKE (buy leg)" + (" — SPREADS ONLY" if is_spread else " — not needed"),
@@ -115,10 +115,12 @@ nt_expiry = sc3.date_input("EXPIRY DATE" + (" — N/A FOR STOCK" if is_stock els
 
 pc1, pc1b, pc2 = st.columns(3)
 nt_premium = pc1.number_input(
-    "ENTRY PRICE PER SHARE" if is_stock else "PREMIUM / NET CREDIT (per share)",
+    "ENTRY PRICE PER SHARE" if is_stock
+    else ("PREMIUM PAID (per share)" if not strat_def["short"] else "PREMIUM / NET CREDIT (per share)"),
     min_value=0.0, step=0.01, key="nt_premium",
-    help="Stock: your purchase price per share." if is_stock else
-         "For short options: credit received per share. For spreads: net credit = sell leg − buy leg.")
+    help=("Stock: your purchase price per share." if is_stock
+          else "Long option: the debit you paid per share." if not strat_def["short"]
+          else "For short options: credit received per share. For spreads: net credit = sell leg − buy leg."))
 # Manual: log the Alpha Trend signal that triggered every trade (daily chart)
 nt_signal  = pc1b.selectbox("ALPHA TREND SIGNAL (DAILY)", [
     "MACRO GREEN + STRENGTH",
