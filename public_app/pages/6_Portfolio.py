@@ -471,7 +471,18 @@ fmt = {
     "% MAX PROFIT":  "{:.0%}",
     "YIELD LEFT":    "{:.1%}",
 }
-disp_book = book[[c for c in book.columns if not c.startswith("_") and c != "ID"]]
+# Strategy filter — applies to the DISPLAYED table only (the KPIs, stress test and
+# risk gauges above always use the full book).
+_strat_opts = sorted(book["STRATEGY"].dropna().unique().tolist())
+_sel_strats = st.segmented_control(
+    "SHOW", _strat_opts, selection_mode="multi", default=_strat_opts, key="pos_filter",
+    help="Filter the table to these position types. Deselect everything to show all again. "
+         "The metrics and risk checks above always use the full book.")
+_active = _sel_strats if _sel_strats else _strat_opts
+fbook = book[book["STRATEGY"].isin(_active)].reset_index(drop=True)
+if len(fbook) < len(book):
+    st.caption(f"Showing {len(fbook)} of {len(book)} open positions.")
+disp_book = fbook[[c for c in fbook.columns if not c.startswith("_") and c != "ID"]]
 styled_book = (disp_book.style
     .map(color_dte,        subset=["DTE LEFT"])
     .map(color_pnl,        subset=["UNREAL PNL"])
@@ -503,7 +514,7 @@ except Exception:
     except Exception:
         _rows = []
 if _rows:
-    picked = book.iloc[_rows]
+    picked = fbook.iloc[_rows]
     st.markdown("#### CLOSE SELECTED → TICKET")
     cbt, cbcap = st.columns([3, 7])
     if cbt.button(f"＋ ADD {len(picked)} TO TICKET (CLOSE)", type="primary",
