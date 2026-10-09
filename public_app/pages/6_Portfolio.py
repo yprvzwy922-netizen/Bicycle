@@ -273,8 +273,13 @@ for _i, (_, t) in enumerate(open_trades.iterrows()):
         # Stock-secured, not cash-secured — no separate cash deployed here
         cash_sec = 0.0
         max_loss = stored_loss if stored_loss is not None else 0.0
+    elif not is_short:
+        # Long single-leg option (Long Call / Long Put hedge): capital at risk =
+        # max loss = the premium PAID. Never strike notional — nothing is secured.
+        cash_sec = stored_cash if stored_cash is not None else prem * 100 * ctrs
+        max_loss = stored_loss if stored_loss is not None else cash_sec
     else:
-        # Cash-secured put / wheel (and long single legs): strike * 100 is correct
+        # Cash-secured put / wheel: strike * 100 is the collateral
         cash_sec = stored_cash if stored_cash is not None else (
             short_strike * 100 * ctrs if short_strike > 0 else 0)
         max_loss = stored_loss if stored_loss is not None else cash_sec
@@ -360,6 +365,7 @@ total_premium  = (pd.to_numeric(short_opt["PREM RECEIVED"], errors="coerce") *
 # entry), otherwise cash is understated by their premium / entry value.
 stock_mv = 0.0
 short_liab = 0.0
+long_opt_mv = 0.0
 for _, r in book.iterrows():
     if r["_IS_STOCK"]:
         s = r["SPOT"]
@@ -371,8 +377,18 @@ for _, r in book.iterrows():
         if cm is None or (isinstance(cm, float) and np.isnan(cm)):
             cm = r["_PREM"] or 0           # unmarked -> NAV assumes flat (mid = premium)
         short_liab += cm * 100 * r["CONTRACTS"]
-acct_cash      = TOTAL_CAPITAL - stock_mv + short_liab
-reserved_cash  = book.loc[~book["_IS_STOCK"], "CASH AT RISK"].sum()
+    else:
+        # Long option (Long Call / Long Put): an ASSET already paid for — the
+        # premium left the account, so it reduces cash. It is NOT cash-secured
+        # like a short. Mark at live mid, fall back to the premium paid.
+        cm = r["CURRENT MID"]
+        if cm is None or (isinstance(cm, float) and np.isnan(cm)):
+            cm = r["_PREM"] or 0
+        long_opt_mv += cm * 100 * r["CONTRACTS"]
+acct_cash      = TOTAL_CAPITAL - stock_mv - long_opt_mv + short_liab
+# Reserved = cash-secured collateral on SHORT options only. Long options are spent
+# premium (already out of cash above), so they aren't reserved against it.
+reserved_cash  = book.loc[(~book["_IS_STOCK"]) & (book["_IS_SHORT"]), "CASH AT RISK"].sum()
 available_cash = acct_cash - reserved_cash
 
 # % deployed is measured against CASH (puts are cash-secured), NOT NAV — NAV
@@ -387,10 +403,10 @@ k1.metric("TOTAL CAPITAL",     f"${TOTAL_CAPITAL:,.0f}",
 k2.metric("TOTAL CASH (T-BILLS)", f"${acct_cash:,.0f}",
           help="Fund value − stock held + premium cash collected. The actual cash in the account.")
 k3.metric("CAPITAL DEPLOYED",  f"${reserved_cash:,.0f}", f"{pct_deployed:.1%}",
-          help="Cash-secured collateral on open options (cash-secured put = strike×100; spreads = "
-               "max loss; covered calls = $0). EXCLUDES assigned stock — that's stock-secured, not "
-               "cash, and already out of TOTAL CASH (see the HELD STOCK panel). So the tiles reconcile: "
-               "TOTAL CASH − CAPITAL DEPLOYED = AVAILABLE CASH.")
+          help="Cash-secured collateral on SHORT options (cash-secured put = strike×100; spreads = "
+               "max loss; covered calls = $0). EXCLUDES assigned stock (stock-secured) and LONG options "
+               "— their premium is already spent, so it reduces TOTAL CASH rather than being reserved. "
+               "So the tiles reconcile: TOTAL CASH − CAPITAL DEPLOYED = AVAILABLE CASH.")
 k4.metric("AVAILABLE CASH",    f"${available_cash:,.0f}",
           help="Dry powder free to deploy into new cash-secured puts (total cash − collateral reserved).")
 k5.metric("PREMIUM RECEIVED",  f"${total_premium:,.0f}",
