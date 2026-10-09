@@ -173,10 +173,12 @@ elif strat_def["type"] == "call" and strat_def["short"] and not is_spread:
     loss_note = "Capped by stock ownership (opportunity cost only)"
 
 else:
-    nt_cash_secured = nt_short_strike * 100 * nt_contracts if nt_short_strike > 0 else 0
-    nt_max_loss = nt_premium * 100 * nt_contracts if not strat_def["short"] else nt_cash_secured
-    cash_note = f"${nt_cash_secured:,.0f}"
-    loss_note = f"${nt_max_loss:,.0f}"
+    # Long single-leg option (Long Call / Long Put hedge): you PAY a debit, so
+    # cash deployed = max loss = the premium paid. The strike is NOT secured.
+    nt_cash_secured = nt_premium * 100 * nt_contracts
+    nt_max_loss     = nt_premium * 100 * nt_contracts
+    cash_note = f"Debit paid = ${nt_premium:.2f} × 100 × {nt_contracts} = ${nt_cash_secured:,.0f}"
+    loss_note = f"Max loss = premium paid (long option) = ${nt_max_loss:,.0f}"
 
 # Preview calculated values
 pc3, pc4, pc5, pc6 = st.columns(4)
