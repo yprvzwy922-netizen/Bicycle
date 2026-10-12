@@ -12,8 +12,8 @@ import streamlit as st
 import bbg_style
 import db
 import ticket
-from shared import (get_watchlist, fetch_spot, bs_put_delta, bs_call_delta,
-                    bs_price, fetch_option_live, fetch_earnings)
+from shared import (get_watchlist, DEFAULT_WATCHLIST, fetch_spot, bs_put_delta,
+                    bs_call_delta, bs_price, fetch_option_live, fetch_earnings)
 import datetime
 
 bbg_style.inject()
@@ -73,7 +73,10 @@ if trades.empty or (trades["STATUS"] == "OPEN").sum() == 0:
 
 open_trades = trades[trades["STATUS"] == "OPEN"].copy()
 wl = get_watchlist()
-wl_map = {w["ticker"]: w for w in wl}
+# Fall back to the code's default list so sector/bucket resolve even for names
+# that haven't been synced into the live Supabase watchlist table yet.
+wl_map = {w["ticker"]: w for w in DEFAULT_WATCHLIST}
+wl_map.update({w["ticker"]: w for w in wl})
 
 # Tickers where we already hold the shares as their own Long Stock row — a
 # covered call on these is just the SHORT CALL leg (the +1 stock delta is
