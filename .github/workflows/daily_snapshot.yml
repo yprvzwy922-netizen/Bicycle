@@ -1,9 +1,28 @@
 name: Daily portfolio snapshot
 
 on:
+  # GitHub starts scheduled jobs late (often by hours) and can drop them when it's
+  # busy, so fire three times after the US close, off the top of the hour.
+  # Re-running the snapshot just rewrites the same day; alerts go out once a day.
+  # Cron is UTC — all three land after the 4pm ET close in both EDT and EST.
   schedule:
-    - cron: "40 21 * * 1-5"
+    - cron: "17 21 * * 1-5"   # 5:17pm EDT / 4:17pm EST
+    - cron: "47 22 * * 1-5"   # 6:47pm EDT / 5:47pm EST
+    - cron: "13 0 * * 2-6"    # 8:13pm EDT / 7:13pm EST (next UTC day)
   workflow_dispatch: {}
+  # Self-test: any change to the job's own code runs it once right away.
+  push:
+    branches: [main]
+    paths:
+      - scripts/daily_snapshot.py
+      - scripts/alerts.py
+      - .github/workflows/daily_snapshot.yml
+
+# One run at a time — overlapping runs would race on the same rows and on the
+# alerts-sent check below.
+concurrency:
+  group: daily-snapshot
+  cancel-in-progress: false
 
 jobs:
   snapshot:
@@ -19,8 +38,27 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+
+      # Alerts go out once per US trading day: the first run that day emails and
+      # leaves a marker in the Actions cache; later runs see it and skip. They run
+      # even if the snapshot step failed. Pushes (self-tests) never email.
+      - name: US trading date
+        id: day
+        if: ${{ !cancelled() }}
+        run: echo "date=$(TZ=America/New_York date +%F)" >> "$GITHUB_OUTPUT"
+      - name: Alerts already emailed today?
+        id: sent
+        if: ${{ !cancelled() && github.event_name != 'push' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: .alerts-sent
+          key: alerts-sent-${{ steps.day.outputs.date }}
+          lookup-only: true
       - name: Position alerts (email)
-        run: python scripts/alerts.py
+        id: alerts
+        if: ${{ !cancelled() && github.event_name != 'push' && steps.sent.outputs.cache-hit != 'true' }}
+        run: python scripts/alerts.py && touch .alerts-sent
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -30,3 +68,10 @@ jobs:
           ALERT_SMTP_PORT:  ${{ secrets.ALERT_SMTP_PORT }}
           ALERT_SMTP_USER:  ${{ secrets.ALERT_SMTP_USER }}
           ALERT_SMTP_PASS:  ${{ secrets.ALERT_SMTP_PASS }}
+      - name: Remember alerts were sent today
+        if: ${{ !cancelled() && steps.alerts.outcome == 'success' }}
+        continue-on-error: true   # worst case is one duplicate email, not a red run
+        uses: actions/cache/save@v4
+        with:
+          path: .alerts-sent
+          key: alerts-sent-${{ steps.day.outputs.date }}

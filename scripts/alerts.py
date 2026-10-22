@@ -15,9 +15,11 @@ Email via SMTP. Set these env vars (GitHub Action secrets):
 If SMTP vars are missing it just prints the alerts (still useful in the log).
 """
 import datetime
+import math
 import os
 import smtplib
 import ssl
+from zoneinfo import ZoneInfo
 from email.mime.text import MIMEText
 
 import requests
@@ -29,7 +31,8 @@ if not URL or not KEY:
     raise SystemExit("SUPABASE_URL / SUPABASE_KEY not set")
 
 HDRS = {"apikey": KEY, "Authorization": f"Bearer {KEY}"}
-TODAY = datetime.date.today()
+# US trading date, not the runner's UTC date (late runs would otherwise be a day ahead)
+TODAY = datetime.datetime.now(ZoneInfo("America/New_York")).date()
 
 
 def trades():
@@ -41,8 +44,8 @@ def trades():
 
 def spot(tkr):
     try:
-        h = yf.Ticker(tkr).history(period="2d")
-        return float(h["Close"].iloc[-1]) if not h.empty else None
+        c = yf.Ticker(tkr).history(period="5d")["Close"].dropna()   # skip Yahoo's NaN rows
+        return float(c.iloc[-1]) if not c.empty else None
     except Exception:
         return None
 
@@ -52,7 +55,8 @@ def opt_mid(tkr, strike, expiry, kind):
         raw = yf.Ticker(tkr).option_chain(expiry)
         chain = raw.puts if kind == "put" else raw.calls
         row = chain.iloc[(chain["strike"] - strike).abs().idxmin()]
-        return float((row["bid"] + row["ask"]) / 2)
+        mid = float((row["bid"] + row["ask"]) / 2)
+        return mid if math.isfinite(mid) else None
     except Exception:
         return None
 
