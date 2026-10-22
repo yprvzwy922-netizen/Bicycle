@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import bbg_style
 import db
+from book import today_et
 from shared import compute_book_pnl, fetch_hist
 
 bbg_style.inject()
@@ -82,7 +83,7 @@ with right:
         cc1, cc2, cc3 = st.columns(3)
         c_inv  = cc1.selectbox("INVESTOR", investors, key="c_inv")
         c_amt  = cc2.number_input("AMOUNT ($)", min_value=0.0, step=1000.0, key="c_amt")
-        c_date = cc3.date_input("DATE", datetime.date.today(), key="c_date")
+        c_date = cc3.date_input("DATE", today_et(), key="c_date")
 
         # Units MUST be priced at the NAV/unit of the CONTRIBUTION DATE, not
         # today's — otherwise a backdated contribution issues units at the wrong

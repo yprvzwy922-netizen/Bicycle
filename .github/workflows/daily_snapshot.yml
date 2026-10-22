@@ -14,8 +14,10 @@ on:
   push:
     branches: [main]
     paths:
-      - scripts/daily_snapshot.py
-      - scripts/alerts.py
+      - scripts/**
+      - public_app/book.py
+      - public_app/risk.py
+      - public_app/watchlist.py
       - .github/workflows/daily_snapshot.yml
 
 # One run at a time — overlapping runs would race on the same rows and on the
@@ -32,7 +34,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install yfinance pandas numpy requests
+      - run: pip install yfinance pandas numpy scipy requests
       - name: Daily NAV + portfolio snapshot
         run: python scripts/daily_snapshot.py
         env:
