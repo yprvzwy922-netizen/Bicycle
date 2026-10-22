@@ -696,13 +696,18 @@ def book_pnl_at(shock: float, mode: str, weeks: int = 0) -> float:
 
 _wk = weeks_fwd if stress_mode == "INSTANT SHOCK" else 0
 shocks     = np.arange(-0.60, 0.605, 0.01)
-curve      = [book_pnl_at(s, stress_mode, _wk) for s in shocks]
+# Total fund P&L = banked realized + open-position unrealized at the shocked spot,
+# so the curve and the drawdown check sit on the same basis as TOTAL_CAPITAL (which
+# already includes realized). Realized is a constant offset: it shifts the curve
+# vertically but does not change its shape or shock sensitivity.
+curve      = [realized_all + book_pnl_at(s, stress_mode, _wk) for s in shocks]
 sel_shock  = st.slider("BASKET SHOCK %", -60, 60, 0, 1) / 100
-pnl_at_sel = book_pnl_at(sel_shock, stress_mode, _wk)
+pnl_at_sel = realized_all + book_pnl_at(sel_shock, stress_mode, _wk)
 
 _hz = f"  ·  +{_wk}W" if _wk else ""
 s1, s2, s3 = st.columns(3)
-s1.metric(f"P&L AT {sel_shock:+.0%}{_hz}", f"${pnl_at_sel:,.0f}")
+s1.metric(f"P&L AT {sel_shock:+.0%}{_hz}", f"${pnl_at_sel:,.0f}",
+          help="Total fund P&L = realized (banked) + unrealized at this shock.")
 s2.metric("VS TOTAL CAPITAL", f"{pnl_at_sel/TOTAL_CAPITAL:+.1%}")
 dd_ok = pnl_at_sel/TOTAL_CAPITAL > -0.30
 s3.metric("DRAWDOWN TOLERANCE (20-30%)", "WITHIN" if dd_ok else "BREACHED")
