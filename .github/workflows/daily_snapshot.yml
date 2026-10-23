@@ -65,7 +65,7 @@ jobs:
       - name: Position alerts (email)
         id: alerts
         if: ${{ !cancelled() && github.event_name != 'push' && steps.sent.outputs.cache-hit != 'true' }}
-        run: python scripts/alerts.py && touch .alerts-sent
+        run: python scripts/alerts.py          # writes .alerts-sent only if delivered
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -76,7 +76,7 @@ jobs:
           ALERT_SMTP_USER:  ${{ secrets.ALERT_SMTP_USER }}
           ALERT_SMTP_PASS:  ${{ secrets.ALERT_SMTP_PASS }}
       - name: Remember alerts were sent today
-        if: ${{ !cancelled() && steps.alerts.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.alerts.outcome == 'success' && hashFiles('.alerts-sent') != '' }}
         continue-on-error: true   # worst case is one duplicate email, not a red run
         uses: actions/cache/save@v4
         with:

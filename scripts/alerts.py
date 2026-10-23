@@ -77,12 +77,15 @@ def risk_alerts(trades, book):
             for c in res["checks"] if c["status"] == "breach"]
 
 
-def send_email(subject, body):
+SENT_FLAG = ".alerts-sent"     # tells the workflow this session's alerts were delivered
+
+
+def send_email(subject, body) -> bool:
     user, pw = os.environ.get("ALERT_SMTP_USER"), os.environ.get("ALERT_SMTP_PASS")
     to = os.environ.get("ALERT_EMAIL_TO")
     if not (user and pw and to):
         print("SMTP not configured — not sent.")
-        return
+        return False
     frm = os.environ.get("ALERT_EMAIL_FROM", user)
     msg = MIMEText(body)
     msg["Subject"], msg["From"], msg["To"] = subject, frm, to
@@ -92,6 +95,7 @@ def send_email(subject, body):
         srv.login(user, pw)
         srv.sendmail(frm, [a.strip() for a in to.split(",")], msg.as_string())
     print("emailed (recipient redacted)")
+    return True
 
 
 if __name__ == "__main__":
@@ -103,8 +107,12 @@ if __name__ == "__main__":
     except Exception as e:                      # never let the risk section block position alerts
         print(f"risk check skipped: {e}")
         lim = []
+    # The once-per-session marker is written ONLY when the email was delivered (or
+    # there was nothing to report) — an unconfigured or failed send must not stop
+    # a later run from delivering this session's alerts.
     if not pos and not lim:
         print(f"{TODAY}: no alerts.")
+        open(SENT_FLAG, "w").close()
     else:
         parts = []
         if lim:
@@ -113,7 +121,8 @@ if __name__ == "__main__":
             parts.append("POSITIONS:\n" + "\n".join("• " + a for a in pos))
         print(f"{TODAY}: {len(pos)} position alert(s), {len(lim)} risk breach(es) — details emailed, not logged.")
         try:
-            send_email(f"Options alerts — {TODAY} ({len(pos)} position, {len(lim)} risk)",
-                       f"Alerts for {TODAY}:\n\n" + "\n\n".join(parts))
+            if send_email(f"Options alerts — {TODAY} ({len(pos)} position, {len(lim)} risk)",
+                          f"Alerts for {TODAY}:\n\n" + "\n\n".join(parts)):
+                open(SENT_FLAG, "w").close()
         except Exception as e:
             print(f"email failed: {e}")
