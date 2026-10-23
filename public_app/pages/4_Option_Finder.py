@@ -458,17 +458,22 @@ if at_action == "sell to open" and st.toggle("PRE-TRADE RISK CHECK", value=True,
         r1 = risk.evaluate(_b1, _nav, _betas, available=bk.cash_summary(_b1, _nav)["available"], events=False)
         imp = risk.trade_impact(r0, r1, _nav)
         st.markdown("#### PRE-TRADE CHECK — THIS TRADE ONLY")
-        if imp["new_breaches"]:
-            st.error("THIS TRADE WOULD BREACH: " + "  ·  ".join(imp["new_breaches"]))
+        if imp["passes"]:
+            st.success("THIS TRADE PASSES YOUR RISK LIMITS.")
         else:
-            st.success("THIS TRADE STAYS WITHIN YOUR LIMITS.")
+            st.error("THIS TRADE FAILS THE RISK CHECK — " + "  ·  ".join(imp["fails"]))
         st.dataframe(pd.DataFrame(imp["rows"]).style.map(
             lambda v: {"OK": "color:#00e676", "WATCH": "color:#ff9900", "ALREADY OVER": "color:#ff9900",
-                       "NEW BREACH": "color:#ff4444;font-weight:700"}.get(v, ""), subset=["VERDICT"]),
+                       "NEW BREACH": "color:#ff4444;font-weight:700",
+                       "ADDS TO BREACH": "color:#ff4444;font-weight:700"}.get(v, ""), subset=["VERDICT"]),
             use_container_width=True, hide_index=True)
         if imp["already_over"]:
-            st.caption("Already over before this trade (not caused by it — see Portfolio → RISK STATUS); "
-                       "this trade adds: " + "  ·  ".join(imp["already_over"]))
+            st.caption("Already over before this trade, but this trade doesn't add to it materially "
+                       "(see Portfolio → RISK STATUS): " + "  ·  ".join(imp["already_over"]))
+        st.caption(f"RULE: a trade fails if it breaches a limit, or ADDS TO one that's already breached — "
+                   f"concentration (this name, sector, speculative) on any increase; QQQ −20% loss / book beta "
+                   f"if it adds more than {risk.LIMITS['tail_add_tol']:.2%} of NAV / "
+                   f"{risk.LIMITS['beta_add_tol']:.3f}×.")
         if imp["earnings"] is not None:
             st.warning(f"{ticker} REPORTS EARNINGS IN {imp['earnings']} DAYS — before this option expires "
                        f"(gap risk on a short option).")

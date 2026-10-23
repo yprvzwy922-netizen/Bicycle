@@ -34,6 +34,11 @@ LIMITS = {
     "max_stock_inv": 0.40,   # max held stock / NAV                      (manual §8.3)
     "dd_warn":       0.05,   # NAV/unit drawdown from peak: slow down
     "dd_stop":       0.10,   # NAV/unit drawdown from peak: stop adding risk
+    # Pre-trade: while the QQQ tail / book beta are over their limits, a new trade
+    # may add at most this much to them (every short put adds some; these let a
+    # genuinely diversifying, low-beta trade through). Concentration has no tolerance.
+    "tail_add_tol":  0.0025, # fraction of NAV added to the loss if QQQ -20%
+    "beta_add_tol":  0.005,  # book beta added
 }
 WARN_AT = 0.85                                     # amber within 15% of a max limit
 BUCKET_BETA = {"Core": 1.2, "Growth": 1.8, "Speculative": 2.5}   # when history is thin
@@ -212,12 +217,14 @@ def evaluate(book, nav, betas=None, limits=None, *, npu=None, peak_npu=None,
 
 def trade_impact(before, after, nav, limits=None, new_id="NEW") -> dict:
     """What ONE new trade does, measured on the trade itself — its own size, its
-    own name and sector — not the book's pre-existing breaches.
+    own name and sector — and whether it may be added.
     before / after = evaluate() without / with the trade (row ID == new_id).
-    Each row's verdict:
-      NEW BREACH   — this trade pushes the measure over its limit
-      ALREADY OVER — it was over before the trade; the trade adds to it
-      WATCH        — within 15% of the limit after the trade
+    Each row's verdict (the first two FAIL the trade):
+      NEW BREACH     — this trade pushes the measure over its limit
+      ADDS TO BREACH — already over, and this trade makes it worse (concentration:
+                       any increase; QQQ tail / book beta: more than the tolerance)
+      ALREADY OVER   — already over, but this trade doesn't (materially) add to it
+      WATCH          — within 15% of the limit after the trade
       OK"""
     L = {**LIMITS, **(limits or {})}
     m0, m1, b1 = before["metrics"], after["metrics"], after["book"]
@@ -225,9 +232,12 @@ def trade_impact(before, after, nav, limits=None, new_id="NEW") -> dict:
     tkr, sector, bucket = t["TICKER"], t["SECTOR"], t["BUCKET"]
     rows = []
 
-    def add(label, v0, v1, lim, fmt="pct", contrib=None, cap_only=False):
+    def add(label, v0, v1, lim, fmt="pct", contrib=None, cap_only=False, tol=0.0):
         if v1 > lim:
-            verdict = "NEW BREACH" if (cap_only or v0 is None or v0 <= lim) else "ALREADY OVER"
+            if cap_only or v0 is None or v0 <= lim:
+                verdict = "NEW BREACH"
+            else:
+                verdict = "ADDS TO BREACH" if v1 - v0 > tol else "ALREADY OVER"
         else:
             verdict = "WATCH" if v1 > WARN_AT * lim else "OK"
         f = {"pct": lambda v: f"{v:.1%}", "x": lambda v: f"{v:.2f}×", "usd": lambda v: f"${v:,.0f}"}[fmt]
@@ -250,19 +260,21 @@ def trade_impact(before, after, nav, limits=None, new_id="NEW") -> dict:
             float(m1["by_bucket"].get(bucket, 0.0)), L["max_spec"])
     # Market risk the trade adds
     add("LOSS IF QQQ −20%", -m0["tail20"] / nav, -m1["tail20"] / nav, L["tail_qqq20"],
-        contrib=f"+${m0['tail20'] - m1['tail20']:,.0f}")
+        contrib=f"+${m0['tail20'] - m1['tail20']:,.0f}", tol=L["tail_add_tol"])
     add(f"BOOK BETA ({tkr} β {t['BETA']:.2f}{'*' if t['BETA EST'] else ''})",
         m0["book_beta"], m1["book_beta"], L["book_beta"], fmt="x",
-        contrib=f"{m1['book_beta'] - m0['book_beta']:+.2f}×")
+        contrib=f"{m1['book_beta'] - m0['book_beta']:+.2f}×", tol=L["beta_add_tol"])
     # Cash: still every put cash-secured afterwards?
     cash = {r["key"]: r["value"] for r in before["checks"]}, {r["key"]: r["value"] for r in after["checks"]}
     if "cash_secured" in cash[1]:
         a0, a1 = cash[0].get("cash_secured", 0.0), cash[1]["cash_secured"]
         rows.append({"MEASURE": "AVAILABLE CASH", "THIS TRADE": f"−${a0 - a1:,.0f}", "BEFORE": f"${a0:,.0f}",
                      "AFTER": f"${a1:,.0f}", "LIMIT": "≥ $0",
-                     "VERDICT": ("NEW BREACH" if a1 < 0 <= a0 else "ALREADY OVER" if a1 < 0 else "OK")})
-    return {"rows": rows, "ticker": tkr,
-            "new_breaches": [r["MEASURE"] for r in rows if r["VERDICT"] == "NEW BREACH"],
+                     "VERDICT": ("NEW BREACH" if a1 < 0 <= a0 else "ADDS TO BREACH" if a1 < min(a0, 0) else "OK")})
+    fails = [r for r in rows if r["VERDICT"] in ("NEW BREACH", "ADDS TO BREACH")]
+    return {"rows": rows, "ticker": tkr, "passes": not fails,
+            "fails": [f"{r['MEASURE']} {'' if r['BEFORE'] == '—' else r['BEFORE'] + ' → '}{r['AFTER']} "
+                      f"(limit {r['LIMIT']})" for r in fails],
             "already_over": [f"{r['MEASURE']} ({r['THIS TRADE']})" for r in rows if r["VERDICT"] == "ALREADY OVER"],
             "earnings": None if bk._missing(t.get("EARNINGS")) else int(t["EARNINGS"])}
 
