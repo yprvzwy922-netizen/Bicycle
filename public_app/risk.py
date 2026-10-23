@@ -210,6 +210,63 @@ def evaluate(book, nav, betas=None, limits=None, *, npu=None, peak_npu=None,
     return {"checks": checks, "metrics": m, "book": b}
 
 
+def trade_impact(before, after, nav, limits=None, new_id="NEW") -> dict:
+    """What ONE new trade does, measured on the trade itself — its own size, its
+    own name and sector — not the book's pre-existing breaches.
+    before / after = evaluate() without / with the trade (row ID == new_id).
+    Each row's verdict:
+      NEW BREACH   — this trade pushes the measure over its limit
+      ALREADY OVER — it was over before the trade; the trade adds to it
+      WATCH        — within 15% of the limit after the trade
+      OK"""
+    L = {**LIMITS, **(limits or {})}
+    m0, m1, b1 = before["metrics"], after["metrics"], after["book"]
+    t = b1[b1["ID"].astype(str) == str(new_id)].iloc[0]
+    tkr, sector, bucket = t["TICKER"], t["SECTOR"], t["BUCKET"]
+    rows = []
+
+    def add(label, v0, v1, lim, fmt="pct", contrib=None, cap_only=False):
+        if v1 > lim:
+            verdict = "NEW BREACH" if (cap_only or v0 is None or v0 <= lim) else "ALREADY OVER"
+        else:
+            verdict = "WATCH" if v1 > WARN_AT * lim else "OK"
+        f = {"pct": lambda v: f"{v:.1%}", "x": lambda v: f"{v:.2f}×", "usd": lambda v: f"${v:,.0f}"}[fmt]
+        rows.append({"MEASURE": label,
+                     "THIS TRADE": contrib if contrib is not None else f((v1 - v0) if v0 is not None else v1),
+                     "BEFORE": f(v0) if v0 is not None else "—", "AFTER": f(v1),
+                     "LIMIT": (f"≤ {lim:.0%}" if fmt == "pct" else f"≤ {lim:.2f}×" if fmt == "x" else "≥ $0"),
+                     "VERDICT": verdict})
+
+    # The trade on its own: position size vs the per-position cap
+    add(f"POSITION SIZE ({tkr})", None, float(t["CASH AT RISK"]) / nav, L["max_trade"], cap_only=True,
+        contrib=f"${float(t['CASH AT RISK']):,.0f}")
+    # Its name and its sector — not "the largest", which can hide a smaller one
+    for label, key, s0, s1 in ((f"NAME: {tkr}", "max_name", m0["by_name"], m1["by_name"]),
+                               (f"SECTOR: {sector}", "max_sector", m0["by_sector"], m1["by_sector"])):
+        k = tkr if key == "max_name" else sector
+        add(label, float(s0.get(k, 0.0)), float(s1.get(k, 0.0)), L[key])
+    if bucket == "Speculative":
+        add("SPECULATIVE BUCKET", float(m0["by_bucket"].get(bucket, 0.0)),
+            float(m1["by_bucket"].get(bucket, 0.0)), L["max_spec"])
+    # Market risk the trade adds
+    add("LOSS IF QQQ −20%", -m0["tail20"] / nav, -m1["tail20"] / nav, L["tail_qqq20"],
+        contrib=f"+${m0['tail20'] - m1['tail20']:,.0f}")
+    add(f"BOOK BETA ({tkr} β {t['BETA']:.2f}{'*' if t['BETA EST'] else ''})",
+        m0["book_beta"], m1["book_beta"], L["book_beta"], fmt="x",
+        contrib=f"{m1['book_beta'] - m0['book_beta']:+.2f}×")
+    # Cash: still every put cash-secured afterwards?
+    cash = {r["key"]: r["value"] for r in before["checks"]}, {r["key"]: r["value"] for r in after["checks"]}
+    if "cash_secured" in cash[1]:
+        a0, a1 = cash[0].get("cash_secured", 0.0), cash[1]["cash_secured"]
+        rows.append({"MEASURE": "AVAILABLE CASH", "THIS TRADE": f"−${a0 - a1:,.0f}", "BEFORE": f"${a0:,.0f}",
+                     "AFTER": f"${a1:,.0f}", "LIMIT": "≥ $0",
+                     "VERDICT": ("NEW BREACH" if a1 < 0 <= a0 else "ALREADY OVER" if a1 < 0 else "OK")})
+    return {"rows": rows, "ticker": tkr,
+            "new_breaches": [r["MEASURE"] for r in rows if r["VERDICT"] == "NEW BREACH"],
+            "already_over": [f"{r['MEASURE']} ({r['THIS TRADE']})" for r in rows if r["VERDICT"] == "ALREADY OVER"],
+            "earnings": None if bk._missing(t.get("EARNINGS")) else int(t["EARNINGS"])}
+
+
 def worst_status(checks) -> str:
     return max((c["status"] for c in checks), key=STATUS_RANK.get, default="ok")
 

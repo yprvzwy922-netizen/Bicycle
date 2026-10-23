@@ -456,36 +456,21 @@ if at_action == "sell to open" and st.toggle("PRE-TRADE RISK CHECK", value=True,
     if _nav > 0:
         r0 = risk.evaluate(_b0, _nav, _betas, available=bk.cash_summary(_b0, _nav)["available"], events=False)
         r1 = risk.evaluate(_b1, _nav, _betas, available=bk.cash_summary(_b1, _nav)["available"], events=False)
-        before = {c["key"]: c for c in r0["checks"]}
-        rows, new_breach, worse = [], [], []
-        for c in r1["checks"]:
-            b = before.get(c["key"])
-            if c["key"] == "drawdown" or (b and risk.fmt_value(b) == risk.fmt_value(c)):
-                continue                                   # unaffected by this order
-            if c["status"] == "breach":
-                (worse if b and b["status"] == "breach" else new_breach).append(c["label"])
-            rows.append({"MEASURE": c["label"], "NOW": risk.fmt_value(b) if b else "—",
-                         "AFTER THIS ORDER": risk.fmt_value(c), "LIMIT": risk.fmt_limit(c),
-                         "STATUS AFTER": {"ok": "OK", "warn": "WATCH", "breach": "BREACH"}[c["status"]]})
-        st.markdown("#### PRE-TRADE CHECK")
-        t0, t1 = -r0["metrics"]["tail20"] / _nav, -r1["metrics"]["tail20"] / _nav
-        st.caption(f"This order adds **${r0['metrics']['tail20'] - r1['metrics']['tail20']:,.0f}** to the loss if "
-                   f"QQQ falls 20% ({t0:.1%} → {t1:.1%} of NAV, limit {risk.LIMITS['tail_qqq20']:.0%}).  "
-                   f"Book beta {r0['metrics']['book_beta']:.2f}× → {r1['metrics']['book_beta']:.2f}×.")
-        if new_breach:
-            st.error("THIS ORDER WOULD BREACH: " + ", ".join(new_breach))
-        elif worse:
-            st.warning("ALREADY OVER THE LIMIT, AND THIS ORDER ADDS TO IT: " + ", ".join(worse))
+        imp = risk.trade_impact(r0, r1, _nav)
+        st.markdown("#### PRE-TRADE CHECK — THIS TRADE ONLY")
+        if imp["new_breaches"]:
+            st.error("THIS TRADE WOULD BREACH: " + "  ·  ".join(imp["new_breaches"]))
         else:
-            st.success("WITHIN ALL LIMITS AFTER THIS ORDER.")
-        if rows:
-            st.dataframe(pd.DataFrame(rows).style.map(
-                lambda v: {"OK": "color:#00e676", "WATCH": "color:#ff9900",
-                           "BREACH": "color:#ff4444;font-weight:700"}.get(v, ""), subset=["STATUS AFTER"]),
-                use_container_width=True, hide_index=True)
-        _ern = _b1.loc[_b1["ID"].astype(str) == "NEW", "EARNINGS"]
-        if len(_ern) and pd.notna(_ern.iloc[0]):
-            st.warning(f"{ticker} REPORTS EARNINGS IN {int(_ern.iloc[0])} DAYS — before this option expires "
+            st.success("THIS TRADE STAYS WITHIN YOUR LIMITS.")
+        st.dataframe(pd.DataFrame(imp["rows"]).style.map(
+            lambda v: {"OK": "color:#00e676", "WATCH": "color:#ff9900", "ALREADY OVER": "color:#ff9900",
+                       "NEW BREACH": "color:#ff4444;font-weight:700"}.get(v, ""), subset=["VERDICT"]),
+            use_container_width=True, hide_index=True)
+        if imp["already_over"]:
+            st.caption("Already over before this trade (not caused by it — see Portfolio → RISK STATUS); "
+                       "this trade adds: " + "  ·  ".join(imp["already_over"]))
+        if imp["earnings"] is not None:
+            st.warning(f"{ticker} REPORTS EARNINGS IN {imp['earnings']} DAYS — before this option expires "
                        f"(gap risk on a short option).")
 
 st.markdown("---")
