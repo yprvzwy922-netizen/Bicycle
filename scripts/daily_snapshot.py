@@ -13,30 +13,23 @@ Positions are priced by public_app/book.py (via eod_feeds.book_now) — the same
 engine as the app. Public repo -> Actions logs are public: never print dollar
 values or position tickers.
 """
-import datetime
 import math
+import os
 import sys
 
 import numpy as np
 import pandas as pd
 
-from eod_feeds import bk, book_now, history, load_trades, rest, risk
+from eod_feeds import bk, book_now, history, load_trades, rest, risk, trading_date
 
-def last_trading_day():
-    """The trading day to stamp the snapshot with: the last bar with a real close
-    (handles weekends and holidays; Yahoo sometimes appends an all-NaN evening
-    row), never a future date. On a trading day this is TODAY even intraday — the
-    later run at close overwrites it — so a run never rewrites a completed day."""
-    now = datetime.datetime.now(bk.ET).date()
-    c = history("SPY")
-    if len(c):
-        return min(c.index[-1].date(), now)
-    while now.weekday() >= 5:            # weekend -> roll back to Friday
-        now -= datetime.timedelta(days=1)
-    return now
-
-TODAY = last_trading_day().isoformat()
+# Dated by the last trading session. On a trading day that's TODAY even intraday
+# (the later run at close overwrites it), so a run never rewrites a completed day.
+TODAY = trading_date().isoformat()
 TODAY_ET = bk.today_et().isoformat()
+# Hand the session date to the workflow — it keys the once-a-day alert email.
+if os.environ.get("GITHUB_OUTPUT"):
+    with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+        fh.write(f"trade_date={TODAY}\n")
 # A snapshot dated before the current ET date is a COMPLETED past session — never
 # overwrite it. Only the live day may be rewritten (intraday -> close).
 IS_PAST_DAY = TODAY < TODAY_ET

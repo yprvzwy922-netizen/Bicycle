@@ -61,6 +61,20 @@ def spot(tkr) -> float:
     return float(c.iloc[-1]) if len(c) else float("nan")
 
 
+def trading_date() -> datetime.date:
+    """The last US trading session: SPY's last bar with a real close (handles
+    weekends and holidays; Yahoo can append an all-NaN row), never a future date.
+    A run at 12:46am Friday is still THURSDAY's session — the snapshot is dated
+    by it and the once-a-day alert email is keyed on it."""
+    now = bk.today_et()
+    c = history("SPY")
+    if len(c):
+        return min(c.index[-1].date(), now)
+    while now.weekday() >= 5:                       # weekend -> Friday
+        now -= datetime.timedelta(days=1)
+    return now
+
+
 _mchain = {}
 
 

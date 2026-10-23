@@ -36,26 +36,31 @@ jobs:
           python-version: "3.11"
       - run: pip install yfinance pandas numpy scipy requests
       - name: Daily NAV + portfolio snapshot
+        id: snap
         run: python scripts/daily_snapshot.py
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
 
-      # Alerts go out once per US trading day: the first run that day emails and
-      # leaves a marker in the Actions cache; later runs see it and skip. They run
-      # even if the snapshot step failed. Pushes (self-tests) never email.
+      # Alerts go out once per US trading SESSION: the first run for a session
+      # emails and leaves a marker in the Actions cache; later runs see it and skip.
+      # Keyed on the session the snapshot dated (a 12:46am run is still yesterday's
+      # session), falling back to the ET calendar date if the snapshot didn't run.
+      # Alerts run even if the snapshot step failed. Pushes (self-tests) never email.
       - name: US trading date
         id: day
         if: ${{ !cancelled() }}
-        run: echo "date=$(TZ=America/New_York date +%F)" >> "$GITHUB_OUTPUT"
+        run: echo "date=${SNAP_DATE:-$(TZ=America/New_York date +%F)}" >> "$GITHUB_OUTPUT"
+        env:
+          SNAP_DATE: ${{ steps.snap.outputs.trade_date }}
       - name: Alerts already emailed today?
         id: sent
         if: ${{ !cancelled() && github.event_name != 'push' }}
         uses: actions/cache/restore@v4
         with:
           path: .alerts-sent
-          key: alerts-sent-${{ steps.day.outputs.date }}
+          key: alerts-sent-v2-${{ steps.day.outputs.date }}
           lookup-only: true
       - name: Position alerts (email)
         id: alerts
@@ -76,4 +81,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .alerts-sent
-          key: alerts-sent-${{ steps.day.outputs.date }}
+          key: alerts-sent-v2-${{ steps.day.outputs.date }}

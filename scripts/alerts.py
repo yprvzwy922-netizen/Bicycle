@@ -25,9 +25,9 @@ from email.mime.text import MIMEText
 
 import pandas as pd
 
-from eod_feeds import bk, book_now, load_trades, rest, risk
+from eod_feeds import bk, book_now, load_trades, rest, risk, trading_date
 
-TODAY = bk.today_et()
+TODAY = trading_date()          # the session these alerts describe (not the calendar date)
 
 
 def position_alerts(book):
