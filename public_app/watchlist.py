@@ -106,6 +106,22 @@ DEFAULT_WATCHLIST = [
     {"ticker": "PSIX",  "company": "Power Solutions Intl",    "sector": "Industrials",          "bucket": "Speculative", "conviction": 3, "delta_band": "Income"},
     {"ticker": "COHR",  "company": "Coherent",                "sector": "Semiconductors",       "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
     {"ticker": "ALAB",  "company": "Astera Labs",             "sector": "Semiconductors",       "bucket": "Growth",      "conviction": 3, "delta_band": "Income"},
+    # ── Diversifiers: high quality, low beta / low correlation to the AI trade (added 2026-10) ──
+    {"ticker": "CB",    "company": "Chubb",                  "sector": "Financials",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "PGR",   "company": "Progressive",            "sector": "Financials",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "V",     "company": "Visa",                   "sector": "Financials",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "CME",   "company": "CME Group",              "sector": "Financials",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "RSG",   "company": "Republic Services",      "sector": "Industrials",          "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "WM",    "company": "Waste Management",       "sector": "Industrials",          "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "JNJ",   "company": "Johnson & Johnson",      "sector": "Healthcare",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "ABT",   "company": "Abbott Laboratories",    "sector": "Healthcare",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "SYK",   "company": "Stryker",                "sector": "Healthcare",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "KO",    "company": "Coca-Cola",              "sector": "Consumer",             "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "PG",    "company": "Procter & Gamble",       "sector": "Consumer",             "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "PEP",   "company": "PepsiCo",                "sector": "Consumer",             "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "ED",    "company": "Consolidated Edison",    "sector": "Utilities",            "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "DUK",   "company": "Duke Energy",            "sector": "Utilities",            "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "VZ",    "company": "Verizon",                "sector": "Communication",        "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
 ]
 
 SECTORS = sorted(set(w["sector"] for w in DEFAULT_WATCHLIST))
