@@ -2,8 +2,9 @@
 Fund & NAV — unitized multi-investor accounting.
 
 Each contribution buys units at the current NAV/unit, so contributions at
-different times are handled fairly. NAV = total contributed + realized P&L +
-unrealized P&L. Daily history is written by scripts/daily_snapshot.py.
+different times are handled fairly; a withdrawal (negative amount) redeems units
+at the NAV/unit of its date. NAV = net contributed + realized P&L + unrealized
+P&L. Daily history is written by scripts/daily_snapshot.py.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -41,8 +42,12 @@ with st.spinner("MARKING BOOK..."):
     realized, unreal = compute_book_pnl(trades)
 
 contribs = db.load_contributions()
-total_contributed = float(pd.to_numeric(contribs["amount"], errors="coerce").sum()) if not contribs.empty else 0.0
-total_units       = float(pd.to_numeric(contribs["units_issued"], errors="coerce").sum()) if not contribs.empty else 0.0
+if not contribs.empty:
+    contribs["amount"] = pd.to_numeric(contribs["amount"], errors="coerce")
+    contribs["units_issued"] = pd.to_numeric(contribs["units_issued"], errors="coerce")
+total_contributed = float(contribs["amount"].sum()) if not contribs.empty else 0.0   # net of withdrawals
+total_deposited   = float(contribs["amount"].clip(lower=0).sum()) if not contribs.empty else 0.0
+total_units       = float(contribs["units_issued"].sum()) if not contribs.empty else 0.0
 
 nav = total_contributed + realized + unreal
 nav_per_unit = (nav / total_units) if total_units > 0 else SEED_NAV_PER_UNIT
@@ -50,10 +55,10 @@ total_pnl = realized + unreal
 
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric("FUND NAV",        f"${nav:,.0f}")
-k2.metric("CONTRIBUTED",     f"${total_contributed:,.0f}")
+k2.metric("NET CONTRIBUTED", f"${total_contributed:,.0f}", help="Contributions minus withdrawals")
 k3.metric("TOTAL P&L ($)",   f"${total_pnl:,.0f}",
-          f"{(total_pnl/total_contributed):+.1%}" if total_contributed > 0 else None,
-          help="Realized + unrealized, in dollars (the % is on contributed capital)")
+          f"{(total_pnl/total_deposited):+.1%}" if total_deposited > 0 else None,
+          help="Realized + unrealized, in dollars (the % is on capital paid in)")
 k4.metric("REALIZED P&L",    f"${realized:,.0f}")
 k5.metric("UNREALIZED P&L",  f"${unreal:,.0f}")
 k6.metric("NAV / UNIT",      f"${nav_per_unit:,.2f}",
@@ -76,13 +81,14 @@ with left:
     st.caption(", ".join(investors) if investors else "No investors yet.")
 
 with right:
-    st.markdown("### LOG A CONTRIBUTION")
+    st.markdown("### LOG A CASH FLOW")
+    st.caption("Positive AMOUNT = contribution (issues units). Negative AMOUNT = withdrawal (redeems units).")
     if not investors:
         st.caption("Add an investor first.")
     else:
         cc1, cc2, cc3 = st.columns(3)
         c_inv  = cc1.selectbox("INVESTOR", investors, key="c_inv")
-        c_amt  = cc2.number_input("AMOUNT ($)", min_value=0.0, step=1000.0, key="c_amt")
+        c_amt  = cc2.number_input("AMOUNT ($) — negative to withdraw", value=0.0, step=1000.0, key="c_amt")
         c_date = cc3.date_input("DATE", today_et(), key="c_date")
 
         # Units MUST be priced at the NAV/unit of the CONTRIBUTION DATE, not
@@ -108,18 +114,26 @@ with right:
         nav_hist, nav_src = _nav_on(c_date)
         use_nav = nav_hist if nav_hist and nav_hist > 0 else nav_per_unit
         units_now = c_amt / use_nav if use_nav > 0 else 0
+        verb = "redeemed" if c_amt < 0 else "issued"
         if nav_hist:
             same = (nav_src == c_date.isoformat())
             st.caption(f"At NAV/unit **${use_nav:,.4f}** (snapshot {nav_src}"
                        f"{'' if same else ' — latest on/before ' + c_date.isoformat()})"
-                       f" → **{units_now:,.2f} units** issued.")
+                       f" → **{abs(units_now):,.2f} units** {verb}.")
         else:
             st.caption(f"No snapshot on/before {c_date.isoformat()} — using CURRENT NAV/unit "
-                       f"${use_nav:,.4f} → **{units_now:,.2f} units** issued.")
-        if st.button("ADD CONTRIBUTION", type="primary") and c_amt > 0:
+                       f"${use_nav:,.4f} → **{abs(units_now):,.2f} units** {verb}.")
+
+        # Guard: an investor can't redeem more units than they hold.
+        held = float(contribs.loc[contribs["investor"] == c_inv, "units_issued"].sum()) if not contribs.empty else 0.0
+        over_withdraw = c_amt < 0 and abs(units_now) > held + 1e-9
+        if over_withdraw:
+            st.error(f"Withdrawal too large — {c_inv} holds {held:,.2f} units "
+                     f"(${held * use_nav:,.0f} at ${use_nav:,.4f}/unit).")
+        if st.button("LOG CASH FLOW", type="primary", disabled=(c_amt == 0 or over_withdraw)):
             db.add_contribution(c_inv, c_date.isoformat(), c_amt, units_now, use_nav)
-            st.success(f"{c_inv} contributed ${c_amt:,.0f} → {units_now:,.2f} units "
-                       f"@ ${use_nav:,.4f}/unit.")
+            st.success(f"{c_inv} {'withdrew' if c_amt < 0 else 'contributed'} ${abs(c_amt):,.0f} → "
+                       f"{abs(units_now):,.2f} units {verb} @ ${use_nav:,.4f}/unit.")
             st.rerun()
 
 st.markdown("---")
@@ -129,27 +143,28 @@ st.markdown("### OWNERSHIP — % OF FUND, VALUE & P&L PER INVESTOR")
 if contribs.empty:
     st.info("No contributions yet. Add investors and log their initial capital above.")
 else:
-    g = contribs.groupby("investor").agg(
-        CONTRIBUTED=("amount", "sum"),
+    g = contribs.assign(_in=contribs["amount"].clip(lower=0)).groupby("investor").agg(
+        CONTRIBUTED=("amount", "sum"),          # net of withdrawals
+        _IN=("_in", "sum"),                     # paid in (contributions only)
         UNITS=("units_issued", "sum"),
     ).reset_index().rename(columns={"investor": "INVESTOR"})
     g["% OF FUND"]   = g["UNITS"] / total_units if total_units else 0
     g["VALUE"]       = g["UNITS"] * nav_per_unit
-    g["P&L ($)"]     = g["VALUE"] - g["CONTRIBUTED"]   # dollar gain (timing-weighted)
-    g["RETURN %"]    = np.where(g["CONTRIBUTED"] > 0, g["VALUE"] / g["CONTRIBUTED"] - 1, 0)
+    g["P&L ($)"]     = g["VALUE"] - g["CONTRIBUTED"]   # value + withdrawals − contributions
+    g["RETURN %"]    = np.where(g["_IN"] > 0, g["P&L ($)"] / g["_IN"], 0)
     g = g.sort_values("% OF FUND", ascending=False)
 
-    # Column order: investor, % of fund, then dollar figures
-    g = g[["INVESTOR", "% OF FUND", "CONTRIBUTED", "VALUE", "P&L ($)", "RETURN %", "UNITS"]]
-
-    # TOTAL row
+    # TOTAL row (before trimming to display columns: it needs _IN)
     tot = pd.DataFrame([{
         "INVESTOR": "TOTAL", "% OF FUND": g["% OF FUND"].sum(),
         "CONTRIBUTED": g["CONTRIBUTED"].sum(), "VALUE": g["VALUE"].sum(),
-        "P&L ($)": g["P&L ($)"].sum(), "RETURN %": (g["VALUE"].sum()/g["CONTRIBUTED"].sum()-1)
-                    if g["CONTRIBUTED"].sum() > 0 else 0,
+        "P&L ($)": g["P&L ($)"].sum(), "RETURN %": (g["P&L ($)"].sum() / g["_IN"].sum())
+                    if g["_IN"].sum() > 0 else 0,
         "UNITS": g["UNITS"].sum(),
     }])
+
+    # Column order: investor, % of fund, then dollar figures
+    g = g[["INVESTOR", "% OF FUND", "CONTRIBUTED", "VALUE", "P&L ($)", "RETURN %", "UNITS"]]
     g = pd.concat([g, tot], ignore_index=True)
 
     def color_pnl(v):
@@ -165,10 +180,11 @@ else:
             "% OF FUND": "{:.1%}", "CONTRIBUTED": "${:,.0f}", "VALUE": "${:,.0f}",
             "P&L ($)": "${:,.0f}", "RETURN %": "{:+.1%}", "UNITS": "{:,.2f}",
         }), use_container_width=True, hide_index=True)
-    st.caption("% OF FUND = your units ÷ total units. P&L ($) = current value − what you put in "
-               "(timing-weighted via unit accounting). RETURN % = P&L ÷ your contributions.")
+    st.caption("% OF FUND = your units ÷ total units. CONTRIBUTED = net of withdrawals. "
+               "P&L ($) = current value + withdrawals − contributions (timing-weighted via unit "
+               "accounting). RETURN % = P&L ÷ what you paid in.")
 
-    with st.expander("ALL CONTRIBUTIONS"):
+    with st.expander("ALL CASH FLOWS"):
         st.dataframe(
             contribs.sort_values("date").style.format({
                 "amount": "${:,.0f}", "units_issued": "{:,.2f}", "nav_per_unit": "${:,.2f}",
@@ -257,19 +273,20 @@ if db.configured():
         fig = go.Figure()
         # Contributions as bars on a SEPARATE right-hand scale, so a $50k bar is
         # readable next to a $260k NAV line (dual axis).
-        contrib_max = 0.0
+        contrib_max = contrib_min = 0.0
         if not contribs.empty and "date" in contribs.columns:
-            cby = (contribs.assign(amount=pd.to_numeric(contribs["amount"], errors="coerce"))
-                   .groupby("date")["amount"].sum().sort_index())
+            cby = contribs.groupby("date")["amount"].sum().sort_index()
             dates = [pd.Timestamp(d) for d in cby.index]
             span = (max(dates) - min(dates)).days if len(dates) > 1 else 6
             bar_w = max(0.35, span * 0.012) * 86400000.0   # narrow -> adjacent days stay separate
-            contrib_max = float(cby.max()) if cby.notna().any() else 0.0
-            fig.add_bar(x=dates, y=list(cby.values), name="CONTRIBUTIONS", yaxis="y2",
-                        marker_color="rgba(255,153,0,0.55)", width=bar_w,
-                        text=[f"+${v:,.0f}" for v in cby.values], textposition="outside",
+            contrib_max = max(float(cby.max()), 0.0) if cby.notna().any() else 0.0
+            contrib_min = min(float(cby.min()), 0.0) if cby.notna().any() else 0.0
+            fig.add_bar(x=dates, y=list(cby.values), name="CASH FLOWS", yaxis="y2",
+                        marker_color=["rgba(255,153,0,0.55)" if v >= 0 else "rgba(255,68,68,0.55)" for v in cby.values],
+                        width=bar_w,
+                        text=[f"{'+' if v >= 0 else '−'}${abs(v):,.0f}" for v in cby.values], textposition="outside",
                         textfont=dict(color="#ff9900", size=10),
-                        hovertemplate="Contribution %{x|%b %d}: $%{y:,.0f}<extra></extra>")
+                        hovertemplate="Cash flow %{x|%b %d}: $%{y:,.0f}<extra></extra>")
         # Fund value (NAV) line on the primary (left) scale
         fig.add_scatter(x=[pd.Timestamp(d) for d in fs["snap_date"]], y=fs["nav"],
                         name="FUND VALUE", mode="lines+markers",
@@ -284,15 +301,15 @@ if db.configured():
                        title=dict(text="NAV", font=dict(color="#00c8ff")),
                        tickfont=dict(color="#00c8ff")),
             yaxis2=dict(overlaying="y", side="right", showgrid=False, tickprefix="$",
-                        title=dict(text="CONTRIB", font=dict(color="#ff9900")),
+                        title=dict(text="CASH FLOW", font=dict(color="#ff9900")),
                         tickfont=dict(color="#ff9900"),
-                        range=[0, contrib_max * 1.6] if contrib_max > 0 else None))
+                        range=[contrib_min * 1.6, contrib_max * 1.6] if (contrib_max > 0 or contrib_min < 0) else None))
         st.plotly_chart(fig, use_container_width=True)
-        st.caption("Blue line = total fund value (NAV, left axis). Orange bars = cash contributions "
-                   "(right axis, own scale so they're readable). Performance is the NAV/unit chart below.")
+        st.caption("Blue line = total fund value (NAV, left axis). Orange bars = contributions, red bars = "
+                   "withdrawals (right axis, own scale so they're readable). Performance is the NAV/unit chart below.")
 
         st.markdown("### NAV PER UNIT — HISTORY")
-        st.caption("Per-unit value is unaffected by infusions (that's the point of unit accounting) "
+        st.caption("Per-unit value is unaffected by contributions or withdrawals (that's the point of unit accounting) "
                    "— this line is pure performance.")
         fig2 = go.Figure()
         fig2.add_scatter(x=fs["snap_date"], y=fs["nav_per_unit"],
