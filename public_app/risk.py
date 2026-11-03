@@ -181,12 +181,8 @@ def evaluate(book, nav, betas=None, limits=None, *, npu=None, peak_npu=None,
                          _max_status(sv, L["max_stock_inv"]), f"${stock_val:,.0f}"))
 
     # No naked short calls: covered-call contracts need 100 held shares each
-    shares = b[b["_IS_STOCK"]].groupby("TICKER")["CONTRACTS"].sum()
-    naked = []
-    for t, g in b[b["_IS_CC"]].groupby("TICKER"):
-        need, have = float(g["CONTRACTS"].sum()) * 100, float(shares.get(t, 0))
-        if need > have + 1e-6:
-            naked.append(f"{t} {int(math.ceil((need - have) / 100))} uncovered")
+    naked = [f"{t} {int(math.ceil(-free / 100))} uncovered"
+             for t, free in bk.call_coverage(b)["FREE"].items() if free < -1e-6]
     checks.append(_check("naked_calls", "NO NAKED CALLS", len(naked), 0,
                          "breach" if naked else "ok", ", ".join(naked) or "all covered", fmt="count"))
 
@@ -247,6 +243,14 @@ def trade_impact(before, after, nav, limits=None, new_id="NEW") -> dict:
                      "LIMIT": (f"≤ {lim:.0%}" if fmt == "pct" else f"≤ {lim:.2f}×" if fmt == "x" else "≥ $0"),
                      "VERDICT": verdict})
 
+    # A short call needs 100 held shares per contract, not already covering another call
+    if t["_IS_CC"]:
+        c0, c1 = bk.call_coverage(before["book"]), bk.call_coverage(b1)
+        held = float(c1["SHARES"].get(tkr, 0.0))
+        n0, n1 = 100 * float(c0["CALLS"].get(tkr, 0.0)), 100 * float(c1["CALLS"].get(tkr, 0.0))
+        rows.append({"MEASURE": f"SHARES TO COVER CALLS ({tkr})", "THIS TRADE": f"+{n1 - n0:,.0f} sh",
+                     "BEFORE": f"{n0:,.0f} sh", "AFTER": f"{n1:,.0f} sh", "LIMIT": f"≤ {held:,.0f} held",
+                     "VERDICT": ("OK" if n1 <= held else "NEW BREACH" if n0 <= held else "ADDS TO BREACH")})
     # The trade on its own: position size vs the per-position cap
     add(f"POSITION SIZE ({tkr})", None, float(t["CASH AT RISK"]) / nav, L["max_trade"], cap_only=True,
         contrib=f"${float(t['CASH AT RISK']):,.0f}")

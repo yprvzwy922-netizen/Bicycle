@@ -473,7 +473,8 @@ if at_action == "sell to open" and st.toggle("PRE-TRADE RISK CHECK", value=True,
         st.caption(f"RULE: a trade fails if it breaches a limit, or ADDS TO one that's already breached — "
                    f"concentration (this name, sector, speculative) on any increase; QQQ −20% loss / book beta "
                    f"if it adds more than {risk.LIMITS['tail_add_tol']:.2%} of NAV / "
-                   f"{risk.LIMITS['beta_add_tol']:.3f}×.")
+                   f"{risk.LIMITS['beta_add_tol']:.3f}×. A short call fails unless the fund holds 100 shares "
+                   f"per contract that aren't already covering another call.")
         if imp["earnings"] is not None:
             st.warning(f"{ticker} REPORTS EARNINGS IN {imp['earnings']} DAYS — before this option expires "
                        f"(gap risk on a short option).")

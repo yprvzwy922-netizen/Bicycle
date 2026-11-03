@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import bbg_style
+import book as bk
 import db
 from shared import (get_watchlist, fetch_spot, fetch_hist, fetch_earnings,
                     best_call, trend_label_score, rv_percentile, prefetch)
@@ -50,8 +51,9 @@ if held.empty:
         st.switch_page("pages/5_Trade_Log.py")
     st.stop()
 
-# Shares held per ticker + track from the watchlist
+# Shares held per ticker (net of shares already covering open calls) + track from the watchlist
 shares_by_tkr = held.groupby("TICKER")["CONTRACTS"].sum().to_dict()
+cover = bk.call_coverage(trades[trades["STATUS"] == "OPEN"])
 wl_map = {w["ticker"]: w for w in get_watchlist()}
 
 prog = st.progress(0, text="FETCHING MARKET DATA...")
@@ -72,13 +74,15 @@ for i, tkr in enumerate(tickers):
         cc    = best_call(tkr, tgt, target_dte)
         if not cc:
             continue
-        shares    = int(shares_by_tkr[tkr])
-        max_calls = shares // 100
+        shares    = int(cover.at[tkr, "SHARES"])
+        written   = int(cover.at[tkr, "CALLS"])
+        max_calls = max(int(cover.at[tkr, "FREE"]) // 100, 0)
         rows.append({
             "TICKER":     tkr,
             "SECTOR":     info.get("sector", "Unknown"),
             "TRACK":      track,
             "SHARES":     shares,
+            "CALLS OPEN": written,
             "MAX CALLS":  max_calls,
             "PRICE":      round(spot, 2),
             "TREND":      trend,
@@ -117,7 +121,7 @@ k3.metric("AVG UPSIDE CAP", f"{df['UPSIDE CAP'].mean():.1%}")
 st.markdown("---")
 
 # ── Table (unified layout) ────────────────────────────────────────────────────
-SHOW = ["TICKER","TRACK","SHARES","MAX CALLS","PRICE","TREND","IV RANK","EARN DAYS",
+SHOW = ["TICKER","TRACK","SHARES","CALLS OPEN","MAX CALLS","PRICE","TREND","IV RANK","EARN DAYS",
         "STRIKE","DELTA","TGT DELTA","IV","PREMIUM","ANN YIELD","UPSIDE CAP",
         "OI","SPREAD","SCORE","EXPIRY"]
 disp = df[[c for c in SHOW if c in df.columns]].copy()
@@ -158,5 +162,6 @@ if not warn.empty:
     st.warning(f"EARNINGS WITHIN 35 DAYS: {names} — covered calls through earnings carry gap risk.")
 
 st.markdown("---")
-st.caption("YIELD = PREMIUM / SPOT | UPSIDE CAP = max gain if called away | MAX CALLS = shares // 100 | "
+st.caption("YIELD = PREMIUM / SPOT | UPSIDE CAP = max gain if called away | "
+           "MAX CALLS = (shares − 100 × calls already open) // 100 | "
            "SCORE = yield + upside-room + delta-fit + liquidity | ALWAYS RECONCILE WITH BROKER")

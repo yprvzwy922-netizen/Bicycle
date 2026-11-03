@@ -365,6 +365,22 @@ def unpriced(book) -> list:
     return book.loc[~book["_PRICED"].astype(bool), "TICKER"].tolist()
 
 
+def call_coverage(positions) -> pd.DataFrame:
+    """Per ticker: SHARES held (Long Stock), CALLS = open covered-call contracts,
+    FREE = shares not yet promised to a call (negative = calls without shares).
+    `positions` = open trades or a built book (TICKER, STRATEGY, CONTRACTS)."""
+    if positions is None or positions.empty:
+        return pd.DataFrame(columns=["SHARES", "CALLS", "FREE"], dtype=float)
+    strat = positions["STRATEGY"].astype(str)
+    tkr = positions["TICKER"].astype(str)
+    qty = pd.to_numeric(positions["CONTRACTS"], errors="coerce").fillna(0)
+    stk, cc = strat.map(is_stock).astype(bool), strat == "Covered Call"
+    out = pd.DataFrame({"SHARES": qty[stk].groupby(tkr[stk]).sum(),
+                        "CALLS": qty[cc].groupby(tkr[cc]).sum()}).fillna(0.0)
+    out["FREE"] = out["SHARES"] - 100 * out["CALLS"]
+    return out
+
+
 def cash_summary(book, total_capital) -> dict:
     """Cash accounting on the book. Unmarked positions use the same assumption
     NAV uses (flat at entry), otherwise cash would be misstated.
