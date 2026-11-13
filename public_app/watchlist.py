@@ -122,6 +122,9 @@ DEFAULT_WATCHLIST = [
     {"ticker": "ED",    "company": "Consolidated Edison",    "sector": "Utilities",            "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
     {"ticker": "DUK",   "company": "Duke Energy",            "sector": "Utilities",            "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
     {"ticker": "VZ",    "company": "Verizon",                "sector": "Communication",        "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    # ── Quality software, top tier of the quality screen (added 2026-11) ──
+    {"ticker": "INTU",  "company": "Intuit",                 "sector": "Technology",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
+    {"ticker": "ADSK",  "company": "Autodesk",               "sector": "Technology",           "bucket": "Core",        "conviction": 3, "delta_band": "Income"},
 ]
 
 SECTORS = sorted(set(w["sector"] for w in DEFAULT_WATCHLIST))
