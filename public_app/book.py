@@ -121,6 +121,21 @@ def bs_call_delta(spot, strike, iv, dte, rf=0.053):
     return _bs_delta(spot, strike, iv, dte, rf, "call")
 
 
+def leg_delta(spot, strike, iv, dte, kind, rf=0.053):
+    """|delta| of one option leg of an OPEN position. Black-Scholes when it can
+    be computed; when it can't (expiry day, or no usable IV) the leg counts as
+    what it is about to become: 1 in the money, 0 out of it. A position must
+    never drop out of the book's exposure just because the formula has no answer."""
+    if not (spot > 0 and strike > 0):           # also False for NaN
+        return float("nan")
+    d = _bs_delta(spot, strike, iv, dte, rf, kind)
+    if not math.isnan(d):
+        return abs(d)
+    if spot == strike:
+        return 0.5
+    return 1.0 if ((spot < strike) if kind == "put" else (spot > strike)) else 0.0
+
+
 def bs_price(spot, strike, iv, dte, rf=0.053, kind="put"):
     """Black-Scholes European option price (scalar).
     Falls back to intrinsic value when expired or IV is unusable."""
@@ -211,7 +226,9 @@ def build_book(open_trades, spot_fn, mark_fn, earnings_fn=None, sector_map=None,
                 spot = mmark
             else:
                 mid = mmark
-        iv_used = float("nan") if stk else (iv if not math.isnan(iv) else 0.35)
+        # The feed sends IV = 0 (not NaN) for deep in-the-money contracts — that
+        # is "no IV", same as missing, so it takes the same fallback.
+        iv_used = float("nan") if stk else (iv if (not math.isnan(iv) and iv > 0) else 0.35)
 
         # Delta — short put +d | short call -d | long stock +1 | covered call -d when
         # shares are a separate row, else 1-d | long put -d | long call +d
@@ -220,7 +237,7 @@ def build_book(open_trades, spot_fn, mark_fn, earnings_fn=None, sector_map=None,
             if stk:
                 delta = 1.0
             elif k > 0 and not math.isnan(spot):
-                d = abs(_bs_delta(spot, k, iv_used, dte, 0.053, kind))
+                d = leg_delta(spot, k, iv_used, dte, kind)
                 if cc:
                     delta = (1.0 - d) if cc_standalone else -d
                 elif is_put:
@@ -228,7 +245,7 @@ def build_book(open_trades, spot_fn, mark_fn, earnings_fn=None, sector_map=None,
                 else:
                     delta = -d if short else d
                 if spread and kl > 0:
-                    d_long = abs(_bs_delta(spot, kl, iv_used, dte, 0.053, kind))
+                    d_long = leg_delta(spot, kl, iv_used, dte, kind)
                     delta = delta - d_long if is_put else delta + d_long
             if not math.isnan(delta) and not math.isnan(spot):
                 dollar_delta = delta * ctrs * mult * spot
@@ -379,6 +396,23 @@ def call_coverage(positions) -> pd.DataFrame:
                         "CALLS": qty[cc].groupby(tkr[cc]).sum()}).fillna(0.0)
     out["FREE"] = out["SHARES"] - 100 * out["CALLS"]
     return out
+
+
+def realized_by_name(trades):
+    """Realized P&L per ticker, split in two Series (wheel, other):
+      wheel — stock lots, short puts and covered calls: the income earned
+              around the shares, which is what a wheel breakeven nets off;
+      other — long options and spreads: separate bets on the name. Their
+              profit or loss is real, but it is not part of the shares' breakeven."""
+    if trades is None or trades.empty:
+        empty = pd.Series(dtype=float)
+        return empty, empty
+    pnl = pd.to_numeric(trades["REALIZED PNL"], errors="coerce").fillna(0)
+    strat = trades["STRATEGY"].astype(str)
+    spread = strat.map(lambda s: STRATEGIES.get(s, {}).get("legs") == "spread" or "Spread" in s)
+    wheel = (strat.map(is_stock) | (strat.map(is_short) & ~spread)).astype(bool)
+    tkr = trades["TICKER"].astype(str)
+    return pnl[wheel].groupby(tkr[wheel]).sum(), pnl[~wheel].groupby(tkr[~wheel]).sum()
 
 
 def cash_summary(book, total_capital) -> dict:

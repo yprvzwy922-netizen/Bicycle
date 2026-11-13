@@ -300,7 +300,9 @@ _stock = book[book["_IS_STOCK"]]
 if not _stock.empty:
     st.markdown("### HELD STOCK — COVERED CALLS & WHEEL BREAKEVEN")
     _cc = book[book["_IS_CC"]]
-    realized_by = pd.to_numeric(trades["REALIZED PNL"], errors="coerce").fillna(0).groupby(trades["TICKER"]).sum()
+    # Only the wheel's own income (puts, covered calls, sold lots) nets off the
+    # shares' cost. Long options and spreads are separate bets: shown, not netted.
+    realized_by, realized_other = bk.realized_by_name(trades)
     hs_rows = []
     for tkr, grp in _stock.groupby("TICKER"):
         sh_qty = pd.to_numeric(grp["CONTRACTS"], errors="coerce").fillna(0)
@@ -316,9 +318,10 @@ if not _stock.empty:
         call_desc = " | ".join(f"{int(r['CONTRACTS'])}×${r['SHORT STRIKE']:g} {str(r['EXPIRY'])[5:] or ''}".strip()
                                for _, r in cgrp.iterrows()) if not cgrp.empty else "—"
         cc_credit = float((cgrp["PREM RECEIVED"] * cgrp["CONTRACTS"] * 100).sum()) if not cgrp.empty else 0.0
-        # Wheel breakeven: share cost less every premium the name has paid us
-        # (closed puts / calls, assignment premium, sold lots) and the open calls' credit.
+        # Wheel breakeven: share cost less the premium the wheel has paid us on the
+        # name (closed puts / calls, assignment premium, sold lots) and the open calls' credit.
         wheel_be = (cost - float(realized_by.get(tkr, 0.0)) - cc_credit) / shares if shares else float("nan")
+        other_pnl = float(realized_other.get(tkr, 0.0))
         covered_sh = call_cts * 100
         free_sh = shares - covered_sh
         hs_rows.append({
@@ -327,6 +330,7 @@ if not _stock.empty:
             "SPOT": round(spot_v, 2) if not np.isnan(spot_v) else None,
             "VS B/E": (spot_v / wheel_be - 1) if (wheel_be and not np.isnan(spot_v) and wheel_be > 0) else None,
             "UNREAL $": round(unreal, 0) if not np.isnan(unreal) else None,
+            "OTHER P&L": round(other_pnl, 0) if other_pnl else None,
             "CALL": call_desc, "COVERED SH": covered_sh, "FREE SH": free_sh, "CALLS AVAIL": int(free_sh // 100),
         })
     hs = pd.DataFrame(hs_rows)
@@ -342,16 +346,19 @@ if not _stock.empty:
 
     st.dataframe(
         hs.style
-          .map(color_pnl, subset=["UNREAL $", "VS B/E"])
+          .map(color_pnl, subset=["UNREAL $", "VS B/E", "OTHER P&L"])
           .map(_c_avail, subset=["CALLS AVAIL"])
           .format({"AVG COST": "${:.2f}", "WHEEL B/E": "${:.2f}", "SPOT": "${:.2f}", "VS B/E": "{:+.1%}",
-                   "UNREAL $": "${:,.0f}", "SHARES": "{:,.0f}", "COVERED SH": "{:,.0f}", "FREE SH": "{:,.0f}"},
+                   "UNREAL $": "${:,.0f}", "OTHER P&L": "${:,.0f}",
+                   "SHARES": "{:,.0f}", "COVERED SH": "{:,.0f}", "FREE SH": "{:,.0f}"},
                   na_rep="—"),
         use_container_width=True, hide_index=True,
         column_config={"TICKER": st.column_config.Column(pinned=True)})
     _avail = int(hs["CALLS AVAIL"].clip(lower=0).sum())
-    st.caption(f"WHEEL B/E = share cost − all premium collected on the name (closed puts & calls, sold lots) − open "
-               f"call credit, per share: the price at which the whole campaign is flat. CALLS AVAIL = free shares ÷ 100 "
+    st.caption(f"WHEEL B/E = share cost − premium the wheel collected on the name (closed puts & covered calls, sold "
+               f"lots) − open call credit, per share: the price at which the shares and the options sold around them "
+               f"are flat. OTHER P&L = realized result of separate bets on the name (long calls / puts, spreads) — "
+               f"shown, not netted into the breakeven. CALLS AVAIL = free shares ÷ 100 "
                f"({_avail} across the book) — green = free shares to write; red = over-covered (naked).")
 
 # ── Tenor mix (manual: ~60-70% 1M / ~30-40% 3M) — options only ───────────────
